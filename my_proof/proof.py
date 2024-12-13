@@ -1,10 +1,39 @@
+# my_proof/models/proof_response.py
+from typing import Dict, Optional, Any
+from pydantic import BaseModel
+
+class ProofResponse(BaseModel):
+    """
+    Represents the response of a proof of contribution. 
+    Only the score and metadata will be written onchain, the rest lives offchain.
+    """
+    dlp_id: int
+    valid: bool = False
+    score: float = 0.0
+    authenticity: float = 0.0
+    ownership: float = 0.0
+    quality: float = 0.0
+    uniqueness: float = 0.0
+    attributes: Optional[Dict[str, Any]] = {}
+    metadata: Optional[Dict[str, Any]] = {}
+
+# my_proof/__init__.py
+# Package initialization
+
+
+# my_proof/proof.py
+import hashlib
 import json
-import time
-import requests
+import logging
 import os
+import time
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
+import requests
+
 from my_proof.models.proof_response import ProofResponse
+
 
 class CoinbaseAPI:
     """Simplified Python port of CoinbaseService for consistent formatting"""
@@ -20,10 +49,14 @@ class CoinbaseAPI:
         response = self._make_request('accounts')
         return response.get('data', [])
 
-    def get_transactions(self, account_id: str) -> list:
-        """Get transactions for an account"""
-        response = self._make_request(f'accounts/{account_id}/transactions')
-        return response.get('data', [])
+    def get_transactions(self, account_id: str, starting_after: Optional[str] = None) -> list:
+        """Get transactions for an account with pagination"""
+        endpoint = f'accounts/{account_id}/transactions'
+        if starting_after:
+            endpoint += f'?starting_after={starting_after}'
+
+        response = self._make_request(endpoint)
+        return response.get('data', []), response.get('pagination', {}).get('next_uri')
 
     def _make_request(self, endpoint: str) -> dict:
         """Make request to Coinbase API with retries"""
@@ -46,25 +79,51 @@ class CoinbaseAPI:
                     raise
                 time.sleep(1)  # Wait before retry
 
+    def get_all_transactions(self) -> list:
+        """Get all transactions with pagination handling"""
+        accounts = self.get_accounts()
+        all_transactions = []
+
+        for account in accounts:
+            has_more = True
+            starting_after = None
+
+            while has_more:
+                transactions, next_uri = self.get_transactions(account['id'], starting_after)
+                all_transactions.extend(transactions)
+
+                if next_uri:
+                    # Extract starting_after from next_uri
+                    try:
+                        starting_after = next_uri.split('starting_after=')[1].split('&')[0]
+                        has_more = True
+                    except (IndexError, AttributeError):
+                        has_more = False
+                else:
+                    has_more = False
+
+                # Add delay to avoid rate limits
+                time.sleep(0.1)
+
+        return all_transactions
+
     def get_formatted_history(self) -> dict:
         """Format data same way as frontend CoinbaseService"""
         # Get user info and transactions
         user = self.get_user_info()['data']
-        accounts = self.get_accounts()
+        # Create hashed account ID for privacy
+        account_id_hash = hashlib.sha256(user['id'].encode()).hexdigest()
 
-        all_transactions = []
-        for account in accounts:
-            transactions = self.get_transactions(account['id'])
-            all_transactions.extend(transactions)
+        # Get all transactions with pagination
+        all_transactions = self.get_all_transactions()
 
         # Calculate statistics
         stats = self._calculate_stats(all_transactions)
 
         return {
             'user': {
-                'name': user['name'],
-                'id': user['id'],
-                'email': user['email']
+                'id_hash': account_id_hash,
+                'transaction_count': len(all_transactions)
             },
             'stats': stats,
             'transactions': [self._format_transaction(t) for t in all_transactions]
@@ -72,22 +131,39 @@ class CoinbaseAPI:
 
     def _calculate_stats(self, transactions: list) -> dict:
         """Calculate transaction statistics"""
+        # Initialize stats
         stats = {
-            'totalVolume': sum(abs(float(t['native_amount']['amount'])) for t in transactions),
+            'totalVolume': 0,
             'transactionCount': len(transactions),
-            'uniqueAssets': set(t['amount']['currency'] for t in transactions)
+            'uniqueAssets': set(),
+            'firstTransactionDate': None,
+            'lastTransactionDate': None
         }
 
-        # Track date range
-        dates = [datetime.strptime(t['created_at'], "%Y-%m-%dT%H:%M:%SZ") for t in transactions]
-        if dates:
-            stats['firstTransactionDate'] = min(dates).isoformat()
-            stats['lastTransactionDate'] = max(dates).isoformat()
-            stats['activityPeriodDays'] = (max(dates) - min(dates)).days
+        for t in transactions:
+            # Calculate volume in native currency
+            stats['totalVolume'] += abs(float(t['native_amount']['amount']))
+            # Track unique assets
+            stats['uniqueAssets'].add(t['amount']['currency'])
+
+            # Track transaction dates
+            date = datetime.strptime(t['created_at'], "%Y-%m-%dT%H:%M:%SZ")
+            if not stats['firstTransactionDate'] or date < datetime.strptime(stats['firstTransactionDate'], "%Y-%m-%dT%H:%M:%SZ"):
+                stats['firstTransactionDate'] = t['created_at']
+            if not stats['lastTransactionDate'] or date > datetime.strptime(stats['lastTransactionDate'], "%Y-%m-%dT%H:%M:%SZ"):
+                stats['lastTransactionDate'] = t['created_at']
+
+        # Calculate activity period
+        if stats['firstTransactionDate'] and stats['lastTransactionDate']:
+            first_date = datetime.strptime(stats['firstTransactionDate'], "%Y-%m-%dT%H:%M:%SZ")
+            last_date = datetime.strptime(stats['lastTransactionDate'], "%Y-%m-%dT%H:%M:%SZ")
+            stats['activityPeriodDays'] = (last_date - first_date).days
+        else:
+            stats['activityPeriodDays'] = 0
 
         return {
             **stats,
-            'uniqueAssets': list(stats['uniqueAssets'])  # Convert set to list for JSON
+            'uniqueAssets': list(stats['uniqueAssets'])
         }
 
     def _format_transaction(self, t: dict) -> dict:
@@ -95,7 +171,7 @@ class CoinbaseAPI:
         native_amount = abs(float(t['native_amount']['amount']))
         quantity = abs(float(t['amount']['amount']))
 
-        return {
+        formatted = {
             'id': t['id'],
             'timestamp': t['created_at'],
             'type': t['type'],
@@ -103,9 +179,20 @@ class CoinbaseAPI:
             'quantity': quantity,
             'native_currency': t['native_amount']['currency'],
             'native_amount': native_amount,
-            'price_at_transaction': native_amount / quantity if quantity != 0 else 0,
-            'total': native_amount
+            'price_at_transaction': native_amount / quantity if quantity != 0 else 0
         }
+
+        # Add fees if present
+        if 'fees' in t and t['fees']:
+            fee_amount = sum(float(fee['amount']['amount']) for fee in t['fees'])
+            formatted['total'] = native_amount + fee_amount
+            formatted['fees'] = fee_amount
+        else:
+            formatted['total'] = native_amount
+            formatted['fees'] = 0
+
+        return formatted
+
 
 class Proof:
     def __init__(self, config: Dict[str, Any]):
@@ -141,7 +228,7 @@ class Proof:
         # Set proof scores
         self.proof_response.authenticity = 1.0 if matches else 0.0  # Data matches what's in Coinbase
         self.proof_response.ownership = 1.0  # User has proven ownership by providing valid token
-        self.proof_response.quality = 1.0  # Data is properly formatted
+        self.proof_response.quality = 1.0 if fresh_data['stats']['transactionCount'] > 0 else 0.0
         self.proof_response.uniqueness = 1.0  # Each user's data is unique
 
         # Calculate overall score
@@ -156,10 +243,17 @@ class Proof:
 
         # Add validation details to attributes
         self.proof_response.attributes = {
-            'user_email': fresh_data['user']['email'],
+            'account_id_hash': fresh_data['user']['id_hash'],
             'transaction_count': fresh_data['stats']['transactionCount'],
             'total_volume': fresh_data['stats']['totalVolume'],
-            'data_validated': matches
+            'data_validated': matches,
+            'activity_period_days': fresh_data['stats']['activityPeriodDays'],
+            'unique_assets': len(fresh_data['stats']['uniqueAssets'])
+        }
+
+        self.proof_response.metadata = {
+            'dlp_id': self.config['dlp_id'],
+            'version': '1.0.0'
         }
 
         return self.proof_response
@@ -170,9 +264,16 @@ class Proof:
         Focus on immutable properties that can't change between fetches.
         """
         try:
-            # Compare user ID
-            if saved_data['user']['id'] != fresh_data['user']['id']:
-                return False
+            # Compare hashed user ID
+            saved_user_id = saved_data['user'].get('id')
+            if saved_user_id:
+                # Hash the saved ID if it's not already hashed
+                saved_hash = (saved_user_id
+                              if len(saved_user_id) == 64
+                              else hashlib.sha256(saved_user_id.encode()).hexdigest())
+
+                if saved_hash != fresh_data['user']['id_hash']:
+                    return False
 
             # Compare historical transactions
             saved_txs = {tx['id']: tx for tx in saved_data['transactions']}
@@ -198,5 +299,5 @@ class Proof:
             return True
 
         except (KeyError, TypeError) as e:
-            print(f"Validation error: {str(e)}")
+            logging.error(f"Validation error: {str(e)}")
             return False
