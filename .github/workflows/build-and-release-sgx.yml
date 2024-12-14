@@ -30,8 +30,8 @@ jobs:
           file: SGX.Dockerfile
           load: true
           tags: |
-            gsc-finquarium-proof:${{ github.run_number }}
-            gsc-finquarium-proof:latest
+            gsc-finquarium-proof-unsigned:${{ github.run_number }}
+            gsc-finquarium-proof-unsigned:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -49,16 +49,16 @@ jobs:
       - name: Build GSC image
         run: |
           cd gsc
-          ./gsc build finquarium-proof ../finquarium-proof.manifest.template -c ../config.yaml
+          ./gsc build gsc-finquarium-proof-unsigned ../finquarium-proof.manifest.template -c ../config.yaml
 
       - name: Sign GSC image
         run: |
           cd gsc
-          ./gsc sign-image finquarium-proof ../signing_key.pem -c ../config.yaml
+          ./gsc sign-image gsc-finquarium-proof-unsigned ../signing_key.pem -c ../config.yaml
 
       - name: Export GSC image to file
         run: |
-          docker save gsc-finqaurium-proof:latest | gzip > gsc-finquarium-proof-${{ github.run_number }}.tar.gz
+          docker save gsc-finquarium-proof:latest | gzip > gsc-finquarium-proof-${{ github.run_number }}.tar.gz
 
       - name: Generate verification data
         run: |
@@ -106,8 +106,8 @@ jobs:
       - name: Log build result
         if: always()
         run: |
-          if [ ${{ job.status }} == "success" ]; then
-            echo "Build and release completed successfully"
+          if [ ${{ job.status }} == 'success' ]; then
+            echo 'Build and release completed successfully'
           else
-            echo "Build and release failed"
+            echo 'Build and release failed'
           fi
