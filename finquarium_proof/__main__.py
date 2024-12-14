@@ -16,7 +16,7 @@ def load_config() -> Dict[str, Any]:
     config = {
         'dlp_id': 1234,  # Set your own DLP ID here
         'input_dir': INPUT_DIR,
-        'env_vars': os.environ
+        'env_vars': dict(os.environ)  # Convert os.environ to a standard dictionary
     }
     logging.info(f"Using config: {json.dumps(config, indent=2)}")
     return config
