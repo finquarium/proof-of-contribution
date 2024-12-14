@@ -5,7 +5,7 @@ import sys
 import traceback
 from typing import Dict, Any
 
-from my_proof.proof import Proof
+from finquarium_proof.proof import Proof
 
 INPUT_DIR, OUTPUT_DIR = '/input', '/output'
 

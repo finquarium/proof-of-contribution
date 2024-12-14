@@ -32,7 +32,7 @@ from typing import Dict, Any, Optional
 
 import requests
 
-from my_proof.models.proof_response import ProofResponse
+from finquarium_proof.models.proof_response import ProofResponse
 
 
 class CoinbaseAPI:
