@@ -1,4 +1,4 @@
-name: Build and Release
+name: Build and Release TDX Image
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
+  build-and-release-tdx:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
