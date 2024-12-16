@@ -49,12 +49,12 @@ jobs:
       - name: Build GSC image
         run: |
           cd gsc
-          ./gsc build gsc-finquarium-proof ../finquarium-proof.manifest.template -c ../config.yaml
+          ./gsc build finquarium-proof ../finquarium-proof.manifest.template -c ../config.yaml
 
       - name: Sign GSC image
         run: |
           cd gsc
-          ./gsc sign-image gsc-finquarium-proof ../signing_key.pem -c ../config.yaml
+          ./gsc sign-image finquarium-proof ../signing_key.pem -c ../config.yaml
 
       - name: Export GSC image to file
         run: |
@@ -106,8 +106,8 @@ jobs:
       - name: Log build result
         if: always()
         run: |
-          if [ ${{ job.status }} == 'success' ]; then
-            echo 'Build and release completed successfully'
+          if [ ${{ job.status }} == "success" ]; then
+            echo "Build and release completed successfully"
           else
-            echo 'Build and release failed'
+            echo "Build and release failed"
           fi
