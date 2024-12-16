@@ -30,8 +30,8 @@ jobs:
           file: SGX.Dockerfile
           load: true
           tags: |
-            gsc-finquarium-proof-unsigned:${{ github.run_number }}
-            gsc-finquarium-proof-unsigned:latest
+            gsc-finquarium-proof:${{ github.run_number }}
+            gsc-finquarium-proof:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -49,12 +49,12 @@ jobs:
       - name: Build GSC image
         run: |
           cd gsc
-          ./gsc build gsc-finquarium-proof-unsigned ../finquarium-proof.manifest.template -c ../config.yaml
+          ./gsc build gsc-finquarium-proof ../finquarium-proof.manifest.template -c ../config.yaml
 
       - name: Sign GSC image
         run: |
           cd gsc
-          ./gsc sign-image gsc-finquarium-proof-unsigned ../signing_key.pem -c ../config.yaml
+          ./gsc sign-image gsc-finquarium-proof ../signing_key.pem -c ../config.yaml
 
       - name: Export GSC image to file
         run: |
