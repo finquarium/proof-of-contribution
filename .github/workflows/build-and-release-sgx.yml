@@ -30,8 +30,8 @@ jobs:
           file: SGX.Dockerfile
           load: true
           tags: |
-            gsc-finquarium-proof:${{ github.run_number }}
-            gsc-finquarium-proof:latest
+            finquarium-proof:${{ github.run_number }}
+            finquarium-proof:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
