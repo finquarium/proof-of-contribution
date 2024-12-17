@@ -72,17 +72,43 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Local Development
+## Local Development
 
-1. Set up environment variables:
-```env
-COINBASE_TOKEN=your_test_token_here
-```
+### Prerequisites
+- Python 3.12+
+- Docker and Docker Compose
+- PostgreSQL client (for psql command)
 
-2. Run locally:
+### Quick Start
+
+1. Clone the repository:
 ```bash
-python -m my_proof
+git clone https://github.com/finquarium/poc
+cd poc
+````
+
+2. Set up development environment:
+```bash
+chmod +x scripts/setup_dev.sh
+./scripts/setup_dev.sh
 ```
+3. Set your Coinbase API token:
+```bash
+export COINBASE_TOKEN=your_test_token_here
+```
+
+4. Run in development mode:
+```bash
+chmod +x scripts/run_dev.sh
+./scripts/run_dev.sh
+```
+The script will:
+
+- Start PostgreSQL in Docker
+- Create test input/output directories
+- Run the proof with test data
+- Output results to test_output/results.json
+
 
 ### Docker Deployment
 

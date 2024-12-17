@@ -1,0 +1,16 @@
+{
+  "user": {
+    "id": "test_user_id"
+  },
+  "transactions": [
+    {
+      "id": "test_tx_1",
+      "type": "buy",
+      "asset": "BTC",
+      "quantity": 1.0,
+      "native_currency": "USD",
+      "native_amount": 50000.00,
+      "timestamp": "2024-01-01T00:00:00Z"
+    }
+  ]
+}
