@@ -214,49 +214,68 @@ class Proof:
     def _store_contribution(self,
                             account_id_hash: str,
                             stats: dict,
-                            proof_response: ProofResponse,
-                            file_id: int = 0) -> None:
+                            proof_response: ProofResponse) -> None:
         """Store contribution details in database"""
         try:
             with db.session() as session:
-                # Update or create user contribution record
-                contribution = session.query(UserContribution).filter_by(
-                    account_id_hash=account_id_hash
-                ).first()
+                # Only store if score > 0
+                if proof_response.score > 0:
+                    # Update or create user contribution record
+                    contribution = session.query(UserContribution).filter_by(
+                        account_id_hash=account_id_hash
+                    ).first()
 
-                if contribution:
-                    # Update existing record
-                    contribution.transaction_count = stats['transactionCount']
-                    contribution.total_volume = stats['totalVolume']
-                    contribution.activity_period_days = stats['activityPeriodDays']
-                    contribution.unique_assets = len(stats['uniqueAssets'])
-                    contribution.latest_score = proof_response.score
-                    contribution.latest_contribution_at = datetime.utcnow()
-                else:
-                    # Create new record
-                    contribution = UserContribution(
+                    # Anonymize the data by removing personal identifiers
+                    anonymized_data = {
+                        'stats': stats,
+                        'transactions': [
+                            {
+                                'type': tx['type'],
+                                'asset': tx['asset'],
+                                'quantity': tx['quantity'],
+                                'native_amount': tx['native_amount'],
+                                'timestamp': tx['timestamp']
+                            } for tx in proof_response.attributes.get('transactions', [])
+                        ]
+                    }
+
+                    if contribution:
+                        # Update existing record
+                        contribution.transaction_count = stats['transactionCount']
+                        contribution.total_volume = stats['totalVolume']
+                        contribution.activity_period_days = stats['activityPeriodDays']
+                        contribution.unique_assets = len(stats['uniqueAssets'])
+                        contribution.latest_score = proof_response.score
+                        contribution.latest_contribution_at = datetime.utcnow()
+                        contribution.raw_data = anonymized_data
+                    else:
+                        # Create new record
+                        contribution = UserContribution(
+                            account_id_hash=account_id_hash,
+                            transaction_count=stats['transactionCount'],
+                            total_volume=stats['totalVolume'],
+                            activity_period_days=stats['activityPeriodDays'],
+                            unique_assets=len(stats['uniqueAssets']),
+                            latest_score=proof_response.score,
+                            times_rewarded=0,
+                            raw_data=anonymized_data
+                        )
+                        session.add(contribution)
+
+                    # Store proof details
+                    proof = ContributionProof(
                         account_id_hash=account_id_hash,
-                        transaction_count=stats['transactionCount'],
-                        total_volume=stats['totalVolume'],
-                        activity_period_days=stats['activityPeriodDays'],
-                        unique_assets=len(stats['uniqueAssets']),
-                        latest_score=proof_response.score,
-                        times_rewarded=0
+                        file_id=int(self.config['env_vars'].get('FILE_ID', 0)),
+                        file_url=self.config['env_vars'].get('FILE_URL', ''),
+                        job_id=self.config['env_vars'].get('JOB_ID', ''),
+                        owner_address=self.config['env_vars'].get('OWNER_ADDRESS', ''),
+                        score=proof_response.score,
+                        authenticity=proof_response.authenticity,
+                        ownership=proof_response.ownership,
+                        quality=proof_response.quality,
+                        uniqueness=proof_response.uniqueness
                     )
-                    session.add(contribution)
-
-                # Store proof details
-                proof = ContributionProof(
-                    account_id_hash=account_id_hash,
-                    dlp_id=proof_response.dlp_id,
-                    file_id=file_id,
-                    score=proof_response.score,
-                    authenticity=proof_response.authenticity,
-                    ownership=proof_response.ownership,
-                    quality=proof_response.quality,
-                    uniqueness=proof_response.uniqueness
-                )
-                session.add(proof)
+                    session.add(proof)
 
         except SQLAlchemyError as e:
             logging.error(f"Database error storing contribution: {e}")
@@ -298,13 +317,33 @@ class Proof:
         self.proof_response.quality = 1.0 if fresh_data['stats']['transactionCount'] > 0 else 0.0
         self.proof_response.uniqueness = self._calculate_uniqueness_score(has_existing)
 
-        # Calculate overall score
-        self.proof_response.score = (
-                self.proof_response.authenticity * 0.4 +
-                self.proof_response.ownership * 0.3 +
-                self.proof_response.quality * 0.2 +
-                self.proof_response.uniqueness * 0.1
-        )
+        # Calculate overall score (0-1) which is used to reward the user
+        # User is rewarded in tokens using this formula:
+        # score * REWARD_FACTOR = NUMBER OF TOKENS
+        # REWARD_FACTOR = The factor used to calculate file rewards. (E.g. **2e18** => the reward multiplier is 2)
+        # Calculate points
+        reward_data = self.calculate_reward_points(fresh_data['stats'])
+
+        # Convert points to score (0-1 range)
+
+        # Update this if max points change
+        MAX_POSSIBLE_POINTS = 630
+
+        self.proof_response.score = min(reward_data['total_points'] / MAX_POSSIBLE_POINTS, 1.0)
+
+        # Store points breakdown in attributes
+        self.proof_response.attributes = {
+            'account_id_hash': fresh_data['user']['id_hash'],
+            'transaction_count': fresh_data['stats']['transactionCount'],
+            'total_volume': fresh_data['stats']['totalVolume'],
+            'data_validated': matches,
+            'activity_period_days': fresh_data['stats']['activityPeriodDays'],
+            'unique_assets': len(fresh_data['stats']['uniqueAssets']),
+            'previously_contributed': has_existing,
+            'times_rewarded': existing_data['times_rewarded'] if existing_data else 0,
+            'points': reward_data['total_points'],
+            'points_breakdown': reward_data['breakdown']
+        }
 
         self.proof_response.valid = (
                 matches and
@@ -325,19 +364,68 @@ class Proof:
 
         self.proof_response.metadata = {
             'dlp_id': self.config['dlp_id'],
-            'version': '1.0.0'
+            'version': '1.0.1'
         }
 
         # Store contribution data
-        # TODO: Get actual file_id from the request context
         self._store_contribution(
             fresh_data['user']['id_hash'],
             fresh_data['stats'],
             self.proof_response,
-            file_id=0
         )
 
         return self.proof_response
+
+    def calculate_reward_points(self, stats: dict) -> dict:
+        """Calculate reward points based on various criteria"""
+        points = 0
+        breakdown = {}
+
+        # Trading volume points
+        volume = stats['totalVolume']
+        if volume >= 1_000_000:
+            points += 500
+            breakdown['volume'] = "500 (1M+ volume)"
+        elif volume >= 100_000:
+            points += 150
+            breakdown['volume'] = "150 (100k+ volume)"
+        elif volume >= 10_000:
+            points += 50
+            breakdown['volume'] = "50 (10k+ volume)"
+        elif volume >= 1_000:
+            points += 25
+            breakdown['volume'] = "25 (1k+ volume)"
+        elif volume >= 100:
+            points += 5
+            breakdown['volume'] = "5 (100+ volume)"
+
+        # Portfolio diversity
+        unique_assets = len(stats['uniqueAssets'])
+        if unique_assets >= 5:
+            points += 30
+            breakdown['diversity'] = "30 (5+ assets)"
+        elif unique_assets >= 3:
+            points += 10
+            breakdown['diversity'] = "10 (3-4 assets)"
+
+        # Historical data
+        days_active = stats['activityPeriodDays']
+        if days_active >= 1095:  # 3 years
+            points += 100
+            breakdown['history'] = "100 (3+ years)"
+        elif days_active >= 365:  # 1 year
+            points += 50
+            breakdown['history'] = "50 (1+ year)"
+
+        # TODO: Implement other criteria once we have the data:
+        # - Monthly trade frequency
+        # - Loss recognition
+        # - Active position rewards
+
+        return {
+            'total_points': points,
+            'breakdown': breakdown
+        }
 
     def _validate_data(self, saved_data: dict, fresh_data: dict) -> bool:
         """

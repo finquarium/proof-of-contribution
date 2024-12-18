@@ -1,7 +1,6 @@
 from datetime import datetime
-from typing import Optional
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, BigInteger
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, Integer, String, Float, DateTime, BigInteger, JSON
+from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
@@ -22,10 +21,8 @@ class UserContribution(Base):
     times_rewarded = Column(Integer, default=0)
     first_contribution_at = Column(DateTime, default=datetime.utcnow)
     latest_contribution_at = Column(DateTime, default=datetime.utcnow)
-
-    # TODO: For future implementation of incremental rewards
-    # latest_transaction_id = Column(String)
-    # latest_transaction_timestamp = Column(DateTime)
+    # Store anonymized raw data
+    raw_data = Column(JSON, nullable=True)
 
 class ContributionProof(Base):
     """
@@ -36,8 +33,10 @@ class ContributionProof(Base):
 
     id = Column(Integer, primary_key=True)
     account_id_hash = Column(String, nullable=False)
-    dlp_id = Column(Integer, nullable=False)
     file_id = Column(BigInteger, nullable=False)
+    file_url = Column(String, nullable=False)
+    job_id = Column(String, nullable=False)
+    owner_address = Column(String, nullable=False)
     score = Column(Float, nullable=False)
     authenticity = Column(Float, nullable=False)
     ownership = Column(Float, nullable=False)
