@@ -1,37 +1,16 @@
-# my_proof/models/proof_response.py
-from typing import Dict, Optional, Any
-from pydantic import BaseModel
-
-class ProofResponse(BaseModel):
-    """
-    Represents the response of a proof of contribution. 
-    Only the score and metadata will be written onchain, the rest lives offchain.
-    """
-    dlp_id: int
-    valid: bool = False
-    score: float = 0.0
-    authenticity: float = 0.0
-    ownership: float = 0.0
-    quality: float = 0.0
-    uniqueness: float = 0.0
-    attributes: Optional[Dict[str, Any]] = {}
-    metadata: Optional[Dict[str, Any]] = {}
-
-# my_proof/__init__.py
-# Package initialization
-
-
-# my_proof/proof.py
 import hashlib
 import json
 import logging
 import os
 import time
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 import requests
+from sqlalchemy.exc import SQLAlchemyError
 
+from finquarium_proof.db import db
+from finquarium_proof.models.db_models import UserContribution, ContributionProof
 from finquarium_proof.models.proof_response import ProofResponse
 
 
@@ -49,7 +28,7 @@ class CoinbaseAPI:
         response = self._make_request('accounts')
         return response.get('data', [])
 
-    def get_transactions(self, account_id: str, starting_after: Optional[str] = None) -> list:
+    def get_transactions(self, account_id: str, starting_after: Optional[str] = None) -> tuple:
         """Get transactions for an account with pagination"""
         endpoint = f'accounts/{account_id}/transactions'
         if starting_after:
@@ -93,7 +72,6 @@ class CoinbaseAPI:
                 all_transactions.extend(transactions)
 
                 if next_uri:
-                    # Extract starting_after from next_uri
                     try:
                         starting_after = next_uri.split('starting_after=')[1].split('&')[0]
                         has_more = True
@@ -102,8 +80,7 @@ class CoinbaseAPI:
                 else:
                     has_more = False
 
-                # Add delay to avoid rate limits
-                time.sleep(0.1)
+                time.sleep(0.1)  # Rate limiting
 
         return all_transactions
 
@@ -131,7 +108,6 @@ class CoinbaseAPI:
 
     def _calculate_stats(self, transactions: list) -> dict:
         """Calculate transaction statistics"""
-        # Initialize stats
         stats = {
             'totalVolume': 0,
             'transactionCount': len(transactions),
@@ -199,9 +175,84 @@ class Proof:
         self.config = config
         self.proof_response = ProofResponse(dlp_id=config['dlp_id'])
 
+    def _check_existing_contribution(self, account_id_hash: str) -> Tuple[bool, Optional[UserContribution]]:
+        """Check if user has already contributed and get their contribution record"""
+        try:
+            with db.session() as session:
+                contribution = session.query(UserContribution).filter_by(
+                    account_id_hash=account_id_hash
+                ).first()
+
+                if contribution:
+                    # User has contributed before
+                    return True, contribution
+                return False, None
+        except SQLAlchemyError as e:
+            logging.error(f"Database error checking existing contribution: {e}")
+            raise
+
+    def _calculate_uniqueness_score(self, has_existing_contribution: bool) -> float:
+        """Calculate uniqueness score based on previous contributions"""
+        # For now, simple binary scoring
+        # TODO: Future implementation could consider:
+        # - Time since last contribution
+        # - Amount of new data since last contribution
+        # - Quality of previous contributions
+        return 0.0 if has_existing_contribution else 1.0
+
+    def _store_contribution(self,
+                            account_id_hash: str,
+                            stats: dict,
+                            proof_response: ProofResponse,
+                            file_id: int = 0) -> None:
+        """Store contribution details in database"""
+        try:
+            with db.session() as session:
+                # Update or create user contribution record
+                contribution = session.query(UserContribution).filter_by(
+                    account_id_hash=account_id_hash
+                ).first()
+
+                if contribution:
+                    # Update existing record
+                    contribution.transaction_count = stats['transactionCount']
+                    contribution.total_volume = stats['totalVolume']
+                    contribution.activity_period_days = stats['activityPeriodDays']
+                    contribution.unique_assets = len(stats['uniqueAssets'])
+                    contribution.latest_score = proof_response.score
+                    contribution.latest_contribution_at = datetime.utcnow()
+                else:
+                    # Create new record
+                    contribution = UserContribution(
+                        account_id_hash=account_id_hash,
+                        transaction_count=stats['transactionCount'],
+                        total_volume=stats['totalVolume'],
+                        activity_period_days=stats['activityPeriodDays'],
+                        unique_assets=len(stats['uniqueAssets']),
+                        latest_score=proof_response.score,
+                        times_rewarded=0
+                    )
+                    session.add(contribution)
+
+                # Store proof details
+                proof = ContributionProof(
+                    account_id_hash=account_id_hash,
+                    dlp_id=proof_response.dlp_id,
+                    file_id=file_id,
+                    score=proof_response.score,
+                    authenticity=proof_response.authenticity,
+                    ownership=proof_response.ownership,
+                    quality=proof_response.quality,
+                    uniqueness=proof_response.uniqueness
+                )
+                session.add(proof)
+
+        except SQLAlchemyError as e:
+            logging.error(f"Database error storing contribution: {e}")
+            raise
+
     def generate(self) -> ProofResponse:
         """Generate proof by comparing decrypted file with fresh Coinbase data"""
-
         # Get Coinbase token from env vars
         token = self.config['env_vars'].get('COINBASE_TOKEN')
         if not token:
@@ -218,18 +269,23 @@ class Proof:
         if not decrypted_data:
             raise ValueError("No decrypted JSON file found")
 
-        # Fetch fresh data from Coinbase 
+        # Fetch fresh data from Coinbase
         coinbase = CoinbaseAPI(token)
         fresh_data = coinbase.get_formatted_history()
+
+        # Check for existing contribution
+        has_existing, existing_contribution = self._check_existing_contribution(
+            fresh_data['user']['id_hash']
+        )
 
         # Compare key data points
         matches = self._validate_data(decrypted_data, fresh_data)
 
         # Set proof scores
-        self.proof_response.authenticity = 1.0 if matches else 0.0  # Data matches what's in Coinbase
+        self.proof_response.authenticity = 1.0 if matches else 0.0
         self.proof_response.ownership = 1.0  # User has proven ownership by providing valid token
         self.proof_response.quality = 1.0 if fresh_data['stats']['transactionCount'] > 0 else 0.0
-        self.proof_response.uniqueness = 1.0  # Each user's data is unique
+        self.proof_response.uniqueness = self._calculate_uniqueness_score(has_existing)
 
         # Calculate overall score
         self.proof_response.score = (
@@ -239,7 +295,10 @@ class Proof:
                 self.proof_response.uniqueness * 0.1
         )
 
-        self.proof_response.valid = matches
+        self.proof_response.valid = (
+                matches and
+                not has_existing  # Only valid if this is first contribution
+        )
 
         # Add validation details to attributes
         self.proof_response.attributes = {
@@ -248,13 +307,24 @@ class Proof:
             'total_volume': fresh_data['stats']['totalVolume'],
             'data_validated': matches,
             'activity_period_days': fresh_data['stats']['activityPeriodDays'],
-            'unique_assets': len(fresh_data['stats']['uniqueAssets'])
+            'unique_assets': len(fresh_data['stats']['uniqueAssets']),
+            'previously_contributed': has_existing,
+            'times_rewarded': existing_contribution.times_rewarded if existing_contribution else 0
         }
 
         self.proof_response.metadata = {
             'dlp_id': self.config['dlp_id'],
             'version': '1.0.0'
         }
+
+        # Store contribution data
+        # TODO: Get actual file_id from the request context
+        self._store_contribution(
+            fresh_data['user']['id_hash'],
+            fresh_data['stats'],
+            self.proof_response,
+            file_id=0
+        )
 
         return self.proof_response
 

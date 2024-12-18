@@ -1,2 +1,6 @@
 pydantic
 requests
+psycopg[binary]
+sqlalchemy
+alembic
+psycopg2
