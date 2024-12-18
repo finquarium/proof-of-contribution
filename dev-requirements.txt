@@ -4,3 +4,4 @@ pytest-cov
 black
 isort
 mypy
+cryptography
