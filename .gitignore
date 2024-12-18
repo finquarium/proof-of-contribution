@@ -7,3 +7,9 @@ demo/*
 !demo/input/
 
 .idea/
+input
+
+.env
+.env.local
+.env.development
+.env.prod
