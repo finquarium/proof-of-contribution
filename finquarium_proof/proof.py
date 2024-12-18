@@ -175,7 +175,12 @@ class Proof:
         self.config = config
         self.proof_response = ProofResponse(dlp_id=config['dlp_id'])
 
-    def _check_existing_contribution(self, account_id_hash: str) -> Tuple[bool, Optional[UserContribution]]:
+    class Proof:
+        def __init__(self, config: Dict[str, Any]):
+            self.config = config
+            self.proof_response = ProofResponse(dlp_id=config['dlp_id'])
+
+    def _check_existing_contribution(self, account_id_hash: str) -> Tuple[bool, Optional[Dict]]:
         """Check if user has already contributed and get their contribution record"""
         try:
             with db.session() as session:
@@ -184,8 +189,14 @@ class Proof:
                 ).first()
 
                 if contribution:
-                    # User has contributed before
-                    return True, contribution
+                    return True, {
+                        'times_rewarded': contribution.times_rewarded,
+                        'transaction_count': contribution.transaction_count,
+                        'total_volume': contribution.total_volume,
+                        'activity_period_days': contribution.activity_period_days,
+                        'unique_assets': contribution.unique_assets,
+                        'latest_score': contribution.latest_score
+                    }
                 return False, None
         except SQLAlchemyError as e:
             logging.error(f"Database error checking existing contribution: {e}")
@@ -274,7 +285,7 @@ class Proof:
         fresh_data = coinbase.get_formatted_history()
 
         # Check for existing contribution
-        has_existing, existing_contribution = self._check_existing_contribution(
+        has_existing, existing_data = self._check_existing_contribution(
             fresh_data['user']['id_hash']
         )
 
@@ -309,7 +320,7 @@ class Proof:
             'activity_period_days': fresh_data['stats']['activityPeriodDays'],
             'unique_assets': len(fresh_data['stats']['uniqueAssets']),
             'previously_contributed': has_existing,
-            'times_rewarded': existing_contribution.times_rewarded if existing_contribution else 0
+            'times_rewarded': existing_data['times_rewarded'] if existing_data else 0
         }
 
         self.proof_response.metadata = {

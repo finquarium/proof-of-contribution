@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 def load_config() -> Dict[str, Any]:
     """Load proof configuration from environment variables."""
     config = {
-        'dlp_id': 1234,  # TODO: Update DLP after registration with DLP root network
+        'dlp_id': 1234,  # TODO: Set your own DLP ID here
         'input_dir': INPUT_DIR,
         'env_vars': dict(os.environ)  # Convert os.environ to a standard dictionary
     }
@@ -41,8 +41,11 @@ def run() -> None:
 
         output_path = os.path.join(OUTPUT_DIR, "results.json")
         with open(output_path, 'w') as f:
-            json.dump(proof_response.dict(), f, indent=2)
-        logging.info(f"Proof generation complete: {proof_response}")
+            # Use model_dump() instead of dict()
+            json.dump(proof_response.model_dump(), f, indent=2)
+
+        # Also update the logging to use model_dump()
+        logging.info(f"Proof generation complete: {proof_response.model_dump()}")
 
     except Exception as e:
         logging.error(f"Error during proof generation: {e}")
