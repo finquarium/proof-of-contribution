@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+# Setup and run the development environment
+
 # Create virtual environment if it doesn't exist
 if [ ! -d "venv" ]; then
     echo "Creating virtual environment..."
@@ -12,6 +14,9 @@ source venv/bin/activate
 
 # Install dependencies
 pip install -r dev-requirements.txt
+
+# Copy test input from test_input into input
+cp -r test_input/* input
 
 # Start PostgreSQL with docker-compose
 docker-compose -f docker-compose.dev.yml up -d
