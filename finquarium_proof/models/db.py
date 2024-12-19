@@ -1,6 +1,5 @@
 """SQLAlchemy database models for storing contribution data"""
 from datetime import datetime
-from typing import Optional
 from sqlalchemy import Column, Integer, String, Float, DateTime, BigInteger, JSON
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -23,7 +22,8 @@ class UserContribution(Base):
     times_rewarded = Column(Integer, default=0)
     first_contribution_at = Column(DateTime, default=datetime.utcnow)
     latest_contribution_at = Column(DateTime, default=datetime.utcnow)
-    raw_data = Column(JSON, nullable=True)  # Stores anonymized trading data
+    raw_data = Column(JSON, nullable=True)
+    encrypted_refresh_token = Column(String, nullable=True)
 
 class ContributionProof(Base):
     """

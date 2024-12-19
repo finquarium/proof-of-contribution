@@ -39,7 +39,8 @@ class StorageService:
             raise
 
     def store_contribution(self, data: ContributionData, proof: ProofResponse,
-                           file_id: int, file_url: str, job_id: str, owner_address: str) -> None:
+                           file_id: int, file_url: str, job_id: str, owner_address: str,
+                           encrypted_refresh_token: str = None) -> None:
         """Store contribution and proof data if score > 0"""
         try:
             if proof.score > 0:
@@ -78,6 +79,9 @@ class StorageService:
                     contribution.latest_score = proof.score
                     contribution.latest_contribution_at = datetime.utcnow()
                     contribution.raw_data = raw_data
+                    # Update encrypted refresh token if provided
+                    if encrypted_refresh_token:
+                        contribution.encrypted_refresh_token = encrypted_refresh_token
                 else:
                     contribution = UserContribution(
                         account_id_hash=data.account_id_hash,
@@ -87,7 +91,8 @@ class StorageService:
                         unique_assets=len(data.stats.unique_assets),
                         latest_score=proof.score,
                         times_rewarded=0,
-                        raw_data=raw_data
+                        raw_data=raw_data,
+                        encrypted_refresh_token=encrypted_refresh_token
                     )
                     self.session.add(contribution)
 
