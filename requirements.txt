@@ -3,3 +3,5 @@ pydantic-settings>=2.0.0
 requests
 psycopg2-binary
 sqlalchemy
+python-gnupg
+boto3>=1.34.0
