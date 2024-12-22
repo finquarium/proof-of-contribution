@@ -29,24 +29,23 @@ jobs:
           context: .
           load: true
           tags: |
-            finquarium-proof:${{ github.run_number }}
             finquarium-proof:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Export image to file
         run: |
-          docker save finquarium-proof:latest | gzip > finquarium-proof-${{ github.run_number }}.tar.gz
+          docker save finquarium-proof:latest | gzip > finquarium-proof.tar.gz
 
       - name: Generate release body
         run: |
-          echo "Image SHA256: $(sha256sum finquarium-proof-${{ github.run_number }}.tar.gz | cut -d' ' -f1)" >> release_body.txt
+          echo "Image SHA256: $(sha256sum finquarium-proof.tar.gz | cut -d' ' -f1)" >> release_body.txt
 
       - name: Upload image
         uses: actions/upload-artifact@v3
         with:
           name: finquarium-proof-image
-          path: finquarium-proof-${{ github.run_number }}.tar.gz
+          path: finquarium-proof.tar.gz
 
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v1
@@ -60,7 +59,7 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            ./finquarium-proof-${{ github.run_number }}.tar.gz
+            ./finquarium-proof.tar.gz
 
       - name: Log build result
         if: always()
