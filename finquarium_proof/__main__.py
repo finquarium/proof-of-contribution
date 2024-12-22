@@ -28,7 +28,7 @@ def run() -> None:
 
         # Log config (excluding sensitive data)
         logger.info("Using configuration:")
-        safe_config = settings.dict(exclude={'COINBASE_TOKEN', 'POSTGRES_URL'})
+        safe_config = settings.model_dump(exclude={'COINBASE_TOKEN', 'POSTGRES_URL'})
         logger.info(json.dumps(safe_config, indent=2))
 
         # Initialize and run proof generation
