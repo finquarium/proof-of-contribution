@@ -141,6 +141,9 @@ class CoinbaseAPI:
 
         # Create anonymized raw data
         raw_data = {
+            'user': {
+                'id_hash': account_id_hash,
+            },
             'stats': stats.__dict__,
             'transactions': [tx.__dict__ for tx in formatted_transactions]
         }
