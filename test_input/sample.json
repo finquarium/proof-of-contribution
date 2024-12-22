@@ -1,16 +1,5 @@
 {
   "user": {
-    "id": "test_user_id"
-  },
-  "transactions": [
-    {
-      "id": "test_tx_1",
-      "type": "buy",
-      "asset": "BTC",
-      "quantity": 1.0,
-      "native_currency": "USD",
-      "native_amount": 50000.00,
-      "timestamp": "2024-01-01T00:00:00Z"
-    }
-  ]
+    "id_hash": "ec815a7710e6646e16d580dc435423aaab6a34598e50ffb5fa47d810033e86a1"
+  }
 }
