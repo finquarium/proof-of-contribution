@@ -113,7 +113,8 @@ class Proof:
                         Bucket=bucket,
                         Key=key,
                         Body=f,
-                        ContentType='application/octet-stream'
+                        ContentType='application/octet-stream',
+                        ACL='public-read'
                     )
                 logger.info(f"Successfully uploaded encrypted file to s3://{bucket}/{key}")
 
