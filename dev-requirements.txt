@@ -5,3 +5,5 @@ black
 isort
 mypy
 cryptography
+web3
+eth_account
