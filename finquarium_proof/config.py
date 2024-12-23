@@ -23,11 +23,11 @@ class Settings(BaseSettings):
     AWS_REGION: str = Field(default="us-east-1", description="AWS region")
 
     # Optional settings with defaults
-    REWARD_FACTOR: int = Field(632, description="Token reward multiplier (x10^18)")
-    MAX_POINTS: int = Field(632, description="Maximum possible points for scoring")
+    REWARD_FACTOR: int = Field(630, description="Token reward multiplier (x10^18)")
+    MAX_POINTS: int = Field(630, description="Maximum possible points for scoring")
 
     # Optional context settings - can be None if not provided
-    DLP_ID: Optional[int] = Field(123, description="Data Liquidity Pool ID")
+    DLP_ID: Optional[int] = Field(13, description="Data Liquidity Pool ID")
     FILE_ID: Optional[int] = Field(0, description="File ID being processed")
     FILE_URL: Optional[str] = Field('https://coinbase-exports.s3.us-east-1.amazonaws.com/encrypted_1734838315613_coinbase_export_1734838314926.json', description="URL of the encrypted file")
     JOB_ID: Optional[int] = Field(0, description="TEE job ID")
