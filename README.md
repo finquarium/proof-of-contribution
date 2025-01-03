@@ -102,8 +102,8 @@ COINBASE_TOKEN=your_coinbase_token
 # Optional with defaults
 INPUT_DIR=/input
 OUTPUT_DIR=/output
-REWARD_FACTOR=630
-MAX_POINTS=630
+REWARD_FACTOR=632
+MAX_POINTS=632
 
 # Context variables
 DLP_ID=1234
