@@ -1,6 +1,6 @@
 """SQLAlchemy database models for storing contribution data"""
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, DateTime, BigInteger, JSON
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, BigInteger, JSON
 from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
@@ -44,3 +44,25 @@ class ContributionProof(Base):
     quality = Column(Float, nullable=False)
     uniqueness = Column(Float, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class MarketInsightSubmission(Base):
+    """
+    Stores market insight submissions
+    """
+    __tablename__ = 'market_insight_submissions'
+
+    id = Column(Integer, primary_key=True)
+    file_id = Column(Integer, nullable=False)
+    owner_address = Column(String, nullable=False, index=True)
+    base_points = Column(Integer, nullable=False)
+    prediction_points = Column(Integer, nullable=False)
+    total_points = Column(Integer, nullable=False)
+    expertise = Column(JSON, nullable=False)
+    strategy = Column(JSON, nullable=False)
+    psychology = Column(JSON, nullable=False)
+    contact_method = Column(String)
+    contact_value = Column(String)
+    allow_updates = Column(Boolean)
+    created_at = Column(DateTime, nullable=False)
+    file_url = Column(String, nullable=False)
+    file_checksum = Column(String, nullable=False)

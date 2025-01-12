@@ -13,3 +13,6 @@ input
 .env.local
 .env.development
 .env.prod
+
+scripts/output/*
+scripts/private_keys/*

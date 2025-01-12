@@ -1,0 +1,37 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "timestamp": 1736630149464,
+    "basePoints": 110,
+    "predictionPoints": 0
+  },
+  "expertise": {
+    "marketExperience": {
+      "Cryptocurrency": "Less than 1 year",
+      "Forex": "Less than 1 year",
+      "Options": "5+ years"
+    },
+    "background": "Professional trader with financial markets experience",
+    "methodologies": ["Technical Analysis", "Risk Management"]
+  },
+  "strategy": {
+    "riskManagement": "Fixed percentage stop loss",
+    "positionSizing": "5-10%",
+    "technicalIndicators": ["RSI", "Support/Resistance", "Moving Averages"],
+    "entryExitStrategy": "Momentum based entries with technical analysis confirmations"
+  },
+  "psychology": {
+    "lossTolerance": 10,
+    "decisionProcess": "systematic",
+    "emotionalManagement": [
+      "Trading journal",
+      "Risk management rules",
+      "Position sizing discipline"
+    ]
+  },
+  "contact": {
+    "method": "telegram",
+    "value": "@trader123",
+    "allowUpdates": true
+  }
+}
