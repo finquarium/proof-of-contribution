@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     MAX_POINTS: int = Field(630, description="Maximum possible points for scoring")
 
     # Optional context settings - can be None if not provided
-    DLP_ID: Optional[int] = Field(25, description="Data Liquidity Pool ID")
+    DLP_ID: Optional[int] = Field(13, description="Data Liquidity Pool ID")
     FILE_ID: Optional[int] = Field(0, description="File ID being processed")
     FILE_URL: Optional[str] = Field('https://coinbase-exports.s3.us-east-1.amazonaws.com/encrypted_1734838315613_coinbase_export_1734838314926.json', description="URL of the encrypted file")
     JOB_ID: Optional[int] = Field(0, description="TEE job ID")
