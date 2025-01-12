@@ -31,13 +31,21 @@ class Proof:
         self.scorer = ContributionScorer()
         self.session = db.get_session()
         self.storage = StorageService(self.session)
-        self.coinbase = CoinbaseAPI(settings.COINBASE_TOKEN)
-        self.s3_client = boto3.client(
-            's3',
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-            region_name=settings.AWS_REGION
-        )
+
+        # Initialize Coinbase client only if token is provided
+        self.coinbase = CoinbaseAPI(settings.COINBASE_TOKEN) if settings.COINBASE_TOKEN else None
+
+        # Initialize S3 client only if credentials are provided
+        if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
+            self.s3_client = boto3.client(
+                's3',
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                region_name=settings.AWS_REGION
+            )
+        else:
+            self.s3_client = None
+
         self.gpg = gnupg.GPG()
 
     def __del__(self):
@@ -47,6 +55,9 @@ class Proof:
 
     def _load_and_validate_user_id_hash(self) -> Tuple[str, str]:
         """Load and validate hashed user ID from saved file"""
+        if not self.coinbase:
+            raise ValueError("Coinbase client not initialized - token missing")
+
         for filename in os.listdir(self.settings.INPUT_DIR):
             if os.path.splitext(filename)[1].lower() == '.json':
                 file_path = os.path.join(self.settings.INPUT_DIR, filename)
@@ -97,6 +108,11 @@ class Proof:
                 # Calculate decrypted checksum
                 decrypted_checksum = self.calculate_checksum(unencrypted_path)
 
+                # If no encryption key provided, just return checksums
+                if not self.settings.ENCRYPTION_KEY:
+                    logger.warning("No encryption key provided, skipping encryption")
+                    return decrypted_checksum, decrypted_checksum
+
                 # Encrypt the file using GPG
                 encrypted_path = os.path.join(temp_dir, "encrypted_data")
                 with open(unencrypted_path, 'rb') as f:
@@ -114,6 +130,11 @@ class Proof:
 
                 # Calculate encrypted checksum
                 encrypted_checksum = self.calculate_checksum(encrypted_path)
+
+                # Skip S3 upload if no client
+                if not self.s3_client:
+                    logger.warning("No S3 client configured, skipping upload")
+                    return encrypted_checksum, decrypted_checksum
 
                 # Parse S3 URL
                 s3_url_parsed = urlparse(s3_url)
@@ -134,7 +155,9 @@ class Proof:
                 return encrypted_checksum, decrypted_checksum
 
         except Exception as e:
-            logger.error(f"Error encrypting and uploading file: {e}")
+            logger.error(f"Error in _encrypt_and_upload: {e}")
+            if not self.s3_client:
+                return decrypted_checksum, decrypted_checksum
             raise
 
     def _detect_submission_type(self, data: dict) -> str:
@@ -218,6 +241,9 @@ class Proof:
     def _process_coinbase_data(self, data: dict, file_url: str) -> ProofResponse:
         """Process coinbase trading data submission"""
         try:
+            if not self.coinbase:
+                raise ValueError("Cannot process Coinbase data - client not initialized")
+
             # Validate user ID ownership
             user_id, file_url = self._load_and_validate_user_id_hash()
 
