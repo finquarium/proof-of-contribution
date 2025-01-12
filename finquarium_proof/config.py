@@ -15,9 +15,9 @@ class Settings(BaseSettings):
     POSTGRES_URL: str = Field(..., description="PostgreSQL connection URL")
 
     # Authentication - made optional with defaults
-    COINBASE_TOKEN: Optional[str] = Field(default='', description="Coinbase API access token")
-    COINBASE_ENCRYPTED_REFRESH_TOKEN: Optional[str] = Field(default='', description="Encrypted Coinbase refresh token")
-    ENCRYPTION_KEY: Optional[str] = Field(default='', description="Encryption key for the file")
+    COINBASE_TOKEN: Optional[str] = Field(default=None, description="Coinbase API access token")
+    COINBASE_ENCRYPTED_REFRESH_TOKEN: Optional[str] = Field(default=None, description="Encrypted Coinbase refresh token")
+    ENCRYPTION_KEY: Optional[str] = Field(default=None, description="Encryption key for the file")
 
     # Optional settings with defaults
     REWARD_FACTOR: int = Field(default=630, description="Token reward multiplier (x10^18)")
@@ -57,7 +57,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file='.env',
         env_file_encoding='utf-8',
-        case_sensitive=True
+        case_sensitive=True,
+        validate_default=True
     )
 
 settings = Settings()
