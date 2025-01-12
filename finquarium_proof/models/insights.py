@@ -39,6 +39,9 @@ class Contact:
     method: str
     value: str
     allowUpdates: bool
+    telegram: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
 
 @dataclass
 class MarketInsights:
@@ -48,11 +51,4 @@ class MarketInsights:
     strategy: Strategy
     psychology: Psychology
     contact: Optional[Contact] = None
-
-# Database model
-# finquarium_proof/models/db.py
-from sqlalchemy import Column, Integer, String, Float, DateTime, JSON, Boolean
-from sqlalchemy.ext.declarative import declarative_base
-
-Base = declarative_base()
 
