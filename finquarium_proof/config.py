@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     MAX_POINTS: int = Field(default=630, description="Maximum possible points for scoring")
 
     # Optional context settings with defaults
-    DLP_ID: Optional[int] = Field(default=13, description="Data Liquidity Pool ID")
+    DLP_ID: Optional[int] = Field(default=25, description="Data Liquidity Pool ID")
     FILE_ID: Optional[int] = Field(default=0, description="File ID being processed")
     FILE_URL: Optional[str] = Field(
         default='https://coinbase-exports.s3.us-east-1.amazonaws.com/encrypted_1734838315613_coinbase_export_1734838314926.json',
