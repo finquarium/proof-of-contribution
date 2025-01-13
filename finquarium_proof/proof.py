@@ -256,15 +256,8 @@ class Proof:
             )
 
             # Calculate validity:
-            # - Must have valid user ID (already checked)
-            # - Must have transactions
-            # - Must not have been previously rewarded
-            # - Account must be at least 30 days old
-            is_valid = (
-                    fresh_data.stats.transaction_count > 0 and
-                    not has_existing and
-                    fresh_data.stats.activity_period_days >= 30  # Minimum account age requirement
-            )
+            # Has not participated before
+            is_valid = not has_existing
 
             # If not valid, score should be 0
             if not is_valid:

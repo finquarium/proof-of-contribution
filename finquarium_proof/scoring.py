@@ -28,7 +28,7 @@ class ContributionScorer:
             return 25, "25 (1k+ volume)"
         elif volume >= 100:
             return 5, "5 (100+ volume)"
-        return 0, "0 (< 100 volume)"
+        return 1, "1 (minimum reward)"
 
     def calculate_diversity_points(self, unique_assets: int) -> tuple[int, str]:
         """Calculate points based on portfolio diversity"""
@@ -59,9 +59,11 @@ class ContributionScorer:
             diversity_reason=diversity_reason,
             history_points=history_points,
             history_reason=history_reason,
-            total_points=volume_points + diversity_points + history_points
+            total_points=max(volume_points + diversity_points + history_points, 1)  # Ensure minimum of 1 point
         )
 
     def normalize_score(self, points: int, max_points: int) -> float:
-        """Convert points to 0-1 score range"""
-        return min(points / max_points, 1.0)
+        """Convert points to 0-1 score range with minimum score for 0.01 FIN"""
+        min_score = 0.0000158730158730159  # This gives 0.01 FIN when multiplied by REWARD_FACTOR (630)
+        raw_score = points / max_points
+        return max(raw_score, min_score)  # Ensure minimum score is achieved
