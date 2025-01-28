@@ -14,8 +14,6 @@ from finquarium_proof.config import Settings
 from finquarium_proof.models.proof import ProofResponse
 from finquarium_proof.services.coinbase import CoinbaseAPI
 from finquarium_proof.services.storage import StorageService
-from finquarium_proof.services.insights import MarketInsightsService
-from finquarium_proof.models.insights import MarketInsights, InsightsMetadata, MarketExperience, Strategy, Psychology, Contact
 from finquarium_proof.scoring import ContributionScorer
 from finquarium_proof.db import db
 from finquarium_proof.utils.json_encoder import DateTimeEncoder
@@ -29,35 +27,13 @@ class Proof:
         """Initialize proof generator with settings"""
         self.settings = settings
         self.scorer = ContributionScorer()
-        self.session = db.get_session()
-        self.storage = StorageService(self.session)
-
-        # Initialize Coinbase client only if token is provided
-        self.coinbase = CoinbaseAPI(settings.COINBASE_TOKEN) if settings.COINBASE_TOKEN else None
-
-        # Initialize S3 client only if credentials are provided
-        if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
-            self.s3_client = boto3.client(
-                's3',
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=settings.AWS_REGION
-            )
-        else:
-            self.s3_client = None
-
+        self.storage = StorageService(db.get_session())
+        self.coinbase = CoinbaseAPI(settings.COINBASE_TOKEN)
+        self.s3_client = boto3.client('s3')
         self.gpg = gnupg.GPG()
-
-    def __del__(self):
-        """Cleanup database session"""
-        if hasattr(self, 'session'):
-            self.session.close()
 
     def _load_and_validate_user_id_hash(self) -> Tuple[str, str]:
         """Load and validate hashed user ID from saved file"""
-        if not self.coinbase:
-            raise ValueError("Coinbase client not initialized - token missing")
-
         for filename in os.listdir(self.settings.INPUT_DIR):
             if os.path.splitext(filename)[1].lower() == '.json':
                 file_path = os.path.join(self.settings.INPUT_DIR, filename)
@@ -108,11 +84,6 @@ class Proof:
                 # Calculate decrypted checksum
                 decrypted_checksum = self.calculate_checksum(unencrypted_path)
 
-                # If no encryption key provided, just return checksums
-                if not self.settings.ENCRYPTION_KEY:
-                    logger.warning("No encryption key provided, skipping encryption")
-                    return decrypted_checksum, decrypted_checksum
-
                 # Encrypt the file using GPG
                 encrypted_path = os.path.join(temp_dir, "encrypted_data")
                 with open(unencrypted_path, 'rb') as f:
@@ -130,11 +101,6 @@ class Proof:
 
                 # Calculate encrypted checksum
                 encrypted_checksum = self.calculate_checksum(encrypted_path)
-
-                # Skip S3 upload if no client
-                if not self.s3_client:
-                    logger.warning("No S3 client configured, skipping upload")
-                    return encrypted_checksum, decrypted_checksum
 
                 # Parse S3 URL
                 s3_url_parsed = urlparse(s3_url)
@@ -155,95 +121,12 @@ class Proof:
                 return encrypted_checksum, decrypted_checksum
 
         except Exception as e:
-            logger.error(f"Error in _encrypt_and_upload: {e}")
-            if not self.s3_client:
-                return decrypted_checksum, decrypted_checksum
+            logger.error(f"Error encrypting and uploading file: {e}")
             raise
 
-    def _detect_submission_type(self, data: dict) -> str:
-        """Detect if submission is market insights or coinbase data"""
-        if 'user' in data and 'id_hash' in data['user']:
-            return 'coinbase'
-        elif 'metadata' in data and 'expertise' in data:
-            return 'insights'
-        else:
-            raise ValueError("Unknown submission type")
-
-    def _process_market_insights(self, data: dict, file_url: str) -> ProofResponse:
-        """Process market insights submission"""
+    def generate(self) -> ProofResponse:
+        """Generate proof by verifying user ID and fetching fresh data"""
         try:
-            # Parse insights data
-            insights = MarketInsights(
-                metadata=InsightsMetadata(**data['metadata']),
-                expertise=MarketExperience(**data['expertise']),
-                strategy=Strategy(**data['strategy']),
-                psychology=Psychology(**data['psychology']),
-                contact=Contact(**data['contact']) if 'contact' in data else None
-            )
-
-            # Encrypt full data and update file in S3
-            encrypted_checksum, decrypted_checksum = self._encrypt_and_upload(
-                data,
-                file_url
-            )
-
-            # Store submission
-            insights_service = MarketInsightsService(self.session)
-            insights_service.store_submission(
-                insights=insights,
-                file_id=self.settings.FILE_ID or 0,
-                owner_address=self.settings.OWNER_ADDRESS or '',
-                file_url=file_url,
-                file_checksum=decrypted_checksum
-            )
-
-            # Create proof response - valid but with 0 score since it's insights only
-            return ProofResponse(
-                dlp_id=self.settings.DLP_ID or 0,
-                valid=True,
-                score=0.0,  # Market insights don't contribute to DLP score
-                authenticity=1.0,  # Data is authentic since it's signed by user
-                ownership=1.0,  # Ownership verified through wallet signature
-                quality=1.0,  # Quality is binary - valid submission
-                uniqueness=1.0,  # Each insights submission is unique
-                attributes={
-                    'submission_type': 'market_insights',
-                    'base_points': insights.metadata.basePoints,
-                    'prediction_points': insights.metadata.predictionPoints,
-                    'total_points': insights.metadata.basePoints + insights.metadata.predictionPoints,
-                    'expertise_markets': len(insights.expertise.marketExperience),
-                    'strategy_indicators': len(insights.strategy.technicalIndicators),
-                    'contact_provided': insights.contact is not None
-                },
-                metadata={
-                    'dlp_id': self.settings.DLP_ID or 0,
-                    'version': insights.metadata.version,
-                    'file_id': self.settings.FILE_ID or 0,
-                    'job_id': self.settings.JOB_ID or '',
-                    'owner_address': self.settings.OWNER_ADDRESS or '',
-                    'submission_type': 'market_insights',
-                    'file': {
-                        'id': self.settings.FILE_ID or 0,
-                        'source': 'TEE',
-                        'url': file_url,
-                        'checksums': {
-                            'encrypted': encrypted_checksum,
-                            'decrypted': decrypted_checksum
-                        }
-                    }
-                }
-            )
-
-        except Exception as e:
-            logger.error(f"Error processing market insights: {e}")
-            raise
-
-    def _process_coinbase_data(self, data: dict, file_url: str) -> ProofResponse:
-        """Process coinbase trading data submission"""
-        try:
-            if not self.coinbase:
-                raise ValueError("Cannot process Coinbase data - client not initialized")
-
             # Validate user ID ownership
             user_id, file_url = self._load_and_validate_user_id_hash()
 
@@ -290,7 +173,6 @@ class Proof:
                 quality=1.0 if fresh_data.stats.transaction_count > 0 else 0.0,
                 uniqueness=0.0 if has_existing else 1.0,
                 attributes={
-                    'submission_type': 'coinbase_trading',
                     'account_id_hash': fresh_data.account_id_hash,
                     'transaction_count': fresh_data.stats.transaction_count,
                     'total_volume': fresh_data.stats.total_volume,
@@ -308,7 +190,6 @@ class Proof:
                     'file_id': self.settings.FILE_ID or 0,
                     'job_id': self.settings.JOB_ID or '',
                     'owner_address': self.settings.OWNER_ADDRESS or '',
-                    'submission_type': 'coinbase_trading',
                     'file': {
                         'id': self.settings.FILE_ID or 0,
                         'source': 'TEE',
@@ -334,27 +215,6 @@ class Proof:
                 )
 
             return proof_response
-
-        except Exception as e:
-            logger.error(f"Error processing Coinbase data: {e}")
-            raise
-
-    def generate(self) -> ProofResponse:
-        """Generate proof by verifying user ID and fetching fresh data"""
-        try:
-            # Load decrypted data
-            for filename in os.listdir(self.settings.INPUT_DIR):
-                if os.path.splitext(filename)[1].lower() == '.json':
-                    file_path = os.path.join(self.settings.INPUT_DIR, filename)
-                    with open(file_path, 'r') as f:
-                        data = json.load(f)
-
-            # Detect submission type and process accordingly
-            submission_type = self._detect_submission_type(data)
-            if submission_type == 'insights':
-                return self._process_market_insights(data, self.settings.FILE_URL)
-            else:
-                return self._process_coinbase_data(data, self.settings.FILE_URL)
 
         except Exception as e:
             logger.error(f"Error generating proof: {e}")

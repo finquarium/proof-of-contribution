@@ -16,3 +16,6 @@ input
 
 scripts/output/*
 scripts/private_keys/*
+
+binance/*
+docs/*
