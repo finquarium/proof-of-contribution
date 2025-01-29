@@ -2,6 +2,11 @@
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Dict, Any
+from enum import Enum
+
+class ContributionType(Enum):
+    COINBASE = "coinbase"
+    BINANCE = "binance"
 
 @dataclass
 class Transaction:
@@ -29,6 +34,10 @@ class ContributionData:
     stats: TradingStats
     transactions: List[Transaction]
     raw_data: Dict[str, Any]  # Original anonymized data
+    contribution_type: ContributionType
+    first_transaction_date: datetime = None
+    last_transaction_date: datetime = None
+
 
 @dataclass
 class ExistingContribution:

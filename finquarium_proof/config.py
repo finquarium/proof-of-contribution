@@ -13,8 +13,15 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
     # Required settings
     POSTGRES_URL: str = Field(..., description="PostgreSQL connection URL")
-    COINBASE_TOKEN: str = Field(..., description="Coinbase API access token")
-    COINBASE_ENCRYPTED_REFRESH_TOKEN: str = Field(..., description="Encrypted Coinbase refresh token")
+
+    # Coinbase settings
+    COINBASE_TOKEN: Optional[str] = Field(None, description="Coinbase API access token")
+    COINBASE_ENCRYPTED_REFRESH_TOKEN: Optional[str] = Field(None, description="Encrypted Coinbase refresh token")
+
+    # Binance settings
+    BINANCE_API_KEY: Optional[str] = Field(None, description="Binance API key")
+    BINANCE_API_SECRET: Optional[str] = Field(None, description="Binance API secret")
+
     ENCRYPTION_KEY: Optional[str] = Field(..., description="Encryption key for the file")
 
     # S3 credentials
