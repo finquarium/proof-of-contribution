@@ -12,10 +12,11 @@ from urllib.parse import urlparse
 
 from finquarium_proof.config import Settings
 from finquarium_proof.models.proof import ProofResponse
-from finquarium_proof.services.coinbase import CoinbaseAPI
+from finquarium_proof.models.contribution import ContributionType, TradingStats, ContributionData, Transaction
+from finquarium_proof.models.binance import BinanceValidationData, BinanceTransaction
+from .services.coinbase import CoinbaseAPI
+from finquarium_proof.services.binance import BinanceValidator
 from finquarium_proof.services.storage import StorageService
-from finquarium_proof.services.insights import MarketInsightsService
-from finquarium_proof.models.insights import MarketInsights, InsightsMetadata, MarketExperience, Strategy, Psychology, Contact
 from finquarium_proof.scoring import ContributionScorer
 from finquarium_proof.db import db
 from finquarium_proof.utils.json_encoder import DateTimeEncoder
@@ -29,34 +30,28 @@ class Proof:
         """Initialize proof generator with settings"""
         self.settings = settings
         self.scorer = ContributionScorer()
-        self.session = db.get_session()
-        self.storage = StorageService(self.session)
-
-        # Initialize Coinbase client only if token is provided
-        self.coinbase = CoinbaseAPI(settings.COINBASE_TOKEN) if settings.COINBASE_TOKEN else None
-
-        # Initialize S3 client only if credentials are provided
-        if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
-            self.s3_client = boto3.client(
-                's3',
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=settings.AWS_REGION
-            )
-        else:
-            self.s3_client = None
-
+        self.storage = StorageService(db.get_session())
+        self.s3_client = boto3.client('s3')
         self.gpg = gnupg.GPG()
 
-    def __del__(self):
-        """Cleanup database session"""
-        if hasattr(self, 'session'):
-            self.session.close()
+        # Initialize API clients based on provided credentials
+        if self.settings.COINBASE_TOKEN:
+            self.coinbase = CoinbaseAPI(self.settings.COINBASE_TOKEN)
+        else:
+            self.coinbase = None
+
+        if self.settings.BINANCE_API_KEY and self.settings.BINANCE_API_SECRET:
+            self.binance_validator = BinanceValidator(
+                self.settings.BINANCE_API_KEY,
+                self.settings.BINANCE_API_SECRET
+            )
+        else:
+            self.binance_validator = None
 
     def _load_and_validate_user_id_hash(self) -> Tuple[str, str]:
         """Load and validate hashed user ID from saved file"""
         if not self.coinbase:
-            raise ValueError("Coinbase client not initialized - token missing")
+            raise ValueError("Coinbase credentials not provided")
 
         for filename in os.listdir(self.settings.INPUT_DIR):
             if os.path.splitext(filename)[1].lower() == '.json':
@@ -108,11 +103,6 @@ class Proof:
                 # Calculate decrypted checksum
                 decrypted_checksum = self.calculate_checksum(unencrypted_path)
 
-                # If no encryption key provided, just return checksums
-                if not self.settings.ENCRYPTION_KEY:
-                    logger.warning("No encryption key provided, skipping encryption")
-                    return decrypted_checksum, decrypted_checksum
-
                 # Encrypt the file using GPG
                 encrypted_path = os.path.join(temp_dir, "encrypted_data")
                 with open(unencrypted_path, 'rb') as f:
@@ -130,11 +120,6 @@ class Proof:
 
                 # Calculate encrypted checksum
                 encrypted_checksum = self.calculate_checksum(encrypted_path)
-
-                # Skip S3 upload if no client
-                if not self.s3_client:
-                    logger.warning("No S3 client configured, skipping upload")
-                    return encrypted_checksum, decrypted_checksum
 
                 # Parse S3 URL
                 s3_url_parsed = urlparse(s3_url)
@@ -155,95 +140,68 @@ class Proof:
                 return encrypted_checksum, decrypted_checksum
 
         except Exception as e:
-            logger.error(f"Error in _encrypt_and_upload: {e}")
-            if not self.s3_client:
-                return decrypted_checksum, decrypted_checksum
+            logger.error(f"Error encrypting and uploading file: {e}")
             raise
 
-    def _detect_submission_type(self, data: dict) -> str:
-        """Detect if submission is market insights or coinbase data"""
-        if 'user' in data and 'id_hash' in data['user']:
-            return 'coinbase'
-        elif 'metadata' in data and 'expertise' in data:
-            return 'insights'
-        else:
-            raise ValueError("Unknown submission type")
+    def _convert_binance_to_contribution_data(self, validation_data: BinanceValidationData) -> ContributionData:
+        """Convert BinanceValidationData to ContributionData for storage compatibility"""
 
-    def _process_market_insights(self, data: dict, file_url: str) -> ProofResponse:
-        """Process market insights submission"""
-        try:
-            # Parse insights data
-            insights = MarketInsights(
-                metadata=InsightsMetadata(**data['metadata']),
-                expertise=MarketExperience(**data['expertise']),
-                strategy=Strategy(**data['strategy']),
-                psychology=Psychology(**data['psychology']),
-                contact=Contact(**data['contact']) if 'contact' in data else None
-            )
+        # Convert BinanceTransactions to common Transaction format
+        transactions = []
+        for tx in validation_data.transactions:
+            transactions.append(Transaction(
+                type='trade',
+                asset=tx.symbol,
+                quantity=float(tx.quantity),
+                native_amount=float(tx.amount),
+                timestamp=tx.timestamp
+            ))
 
-            # Encrypt full data and update file in S3
-            encrypted_checksum, decrypted_checksum = self._encrypt_and_upload(
-                data,
-                file_url
-            )
+        # Create TradingStats from validation data
+        stats = TradingStats(
+            total_volume=float(validation_data.total_volume),
+            transaction_count=len(validation_data.transactions),
+            unique_assets=list(set(tx.symbol for tx in validation_data.transactions)),
+            activity_period_days=(validation_data.end_time - validation_data.start_time).days,
+            first_transaction_date=validation_data.start_time,
+            last_transaction_date=validation_data.end_time
+        )
 
-            # Store submission
-            insights_service = MarketInsightsService(self.session)
-            insights_service.store_submission(
-                insights=insights,
-                file_id=self.settings.FILE_ID or 0,
-                owner_address=self.settings.OWNER_ADDRESS or '',
-                file_url=file_url,
-                file_checksum=decrypted_checksum
-            )
+        # Create raw data structure matching Coinbase format
+        raw_data = {
+            'user': {
+                'id_hash': validation_data.account_id_hash
+            },
+            'stats': stats.__dict__,
+            'transactions': [tx.__dict__ for tx in transactions]
+        }
 
-            # Create proof response - valid but with 0 score since it's insights only
-            return ProofResponse(
-                dlp_id=self.settings.DLP_ID or 0,
-                valid=True,
-                score=0.0,  # Market insights don't contribute to DLP score
-                authenticity=1.0,  # Data is authentic since it's signed by user
-                ownership=1.0,  # Ownership verified through wallet signature
-                quality=1.0,  # Quality is binary - valid submission
-                uniqueness=1.0,  # Each insights submission is unique
-                attributes={
-                    'submission_type': 'market_insights',
-                    'base_points': insights.metadata.basePoints,
-                    'prediction_points': insights.metadata.predictionPoints,
-                    'total_points': insights.metadata.basePoints + insights.metadata.predictionPoints,
-                    'expertise_markets': len(insights.expertise.marketExperience),
-                    'strategy_indicators': len(insights.strategy.technicalIndicators),
-                    'contact_provided': insights.contact is not None
-                },
-                metadata={
-                    'dlp_id': self.settings.DLP_ID or 0,
-                    'version': insights.metadata.version,
-                    'file_id': self.settings.FILE_ID or 0,
-                    'job_id': self.settings.JOB_ID or '',
-                    'owner_address': self.settings.OWNER_ADDRESS or '',
-                    'submission_type': 'market_insights',
-                    'file': {
-                        'id': self.settings.FILE_ID or 0,
-                        'source': 'TEE',
-                        'url': file_url,
-                        'checksums': {
-                            'encrypted': encrypted_checksum,
-                            'decrypted': decrypted_checksum
-                        }
-                    }
-                }
-            )
+        return ContributionData(
+            account_id_hash=validation_data.account_id_hash,
+            stats=stats,
+            transactions=transactions,
+            raw_data=raw_data,
+            contribution_type=ContributionType.BINANCE,
+            first_transaction_date=validation_data.start_time,
+            last_transaction_date=validation_data.end_time
+        )
 
-        except Exception as e:
-            logger.error(f"Error processing market insights: {e}")
-            raise
-
-    def _process_coinbase_data(self, data: dict, file_url: str) -> ProofResponse:
-        """Process coinbase trading data submission"""
-        try:
+    def generate(self, contribution_type: ContributionType = ContributionType.COINBASE) -> ProofResponse:
+        """Generate proof by verifying user ID and fetching fresh data"""
+        if contribution_type == ContributionType.COINBASE:
             if not self.coinbase:
-                raise ValueError("Cannot process Coinbase data - client not initialized")
+                raise ValueError("Coinbase credentials not provided")
+            return self._generate_coinbase_proof()
+        elif contribution_type == ContributionType.BINANCE:
+            if not self.binance_validator:
+                raise ValueError("Binance credentials not provided")
+            return self._generate_binance_proof()
+        else:
+            raise ValueError(f"Unsupported contribution type: {contribution_type}")
 
+    def _generate_coinbase_proof(self) -> ProofResponse:
+        """Original Coinbase proof generation logic"""
+        try:
             # Validate user ID ownership
             user_id, file_url = self._load_and_validate_user_id_hash()
 
@@ -259,7 +217,7 @@ class Proof:
             # Has not participated before
             is_valid = not has_existing
 
-            # If not valid, score should be 0
+            # Calculate scores
             if not is_valid:
                 score = 0
                 points = 0
@@ -269,12 +227,11 @@ class Proof:
                     'history': '0 (invalid contribution)'
                 }
             else:
-                # Calculate scores for valid contribution
                 points_breakdown = self.scorer.calculate_score(fresh_data.stats)
                 points = points_breakdown.total_points
                 score = self.scorer.normalize_score(points_breakdown.total_points, self.settings.MAX_POINTS)
 
-            # Encrypt full data and update file in S3
+            # Encrypt and update file in S3
             encrypted_checksum, decrypted_checksum = self._encrypt_and_upload(
                 fresh_data.raw_data,
                 file_url
@@ -282,7 +239,7 @@ class Proof:
 
             # Create proof response
             proof_response = ProofResponse(
-                dlp_id=self.settings.DLP_ID or 0,
+                dlp_id=self.settings.DLP_ID,
                 valid=is_valid,
                 score=score,
                 authenticity=1.0,  # Data is fresh from Coinbase
@@ -290,17 +247,16 @@ class Proof:
                 quality=1.0 if fresh_data.stats.transaction_count > 0 else 0.0,
                 uniqueness=0.0 if has_existing else 1.0,
                 attributes={
-                    'submission_type': 'coinbase_trading',
                     'account_id_hash': fresh_data.account_id_hash,
                     'transaction_count': fresh_data.stats.transaction_count,
-                    'total_volume': fresh_data.stats.total_volume,
+                    'total_volume': float(fresh_data.stats.total_volume),
                     'data_validated': True,
                     'activity_period_days': fresh_data.stats.activity_period_days,
                     'unique_assets': len(fresh_data.stats.unique_assets),
                     'previously_contributed': has_existing,
                     'times_rewarded': existing_data.times_rewarded if existing_data else 0,
                     'points': points,
-                    'points_breakdown': points_breakdown
+                    'points_breakdown': points_breakdown,
                 },
                 metadata={
                     'dlp_id': self.settings.DLP_ID or 0,
@@ -308,7 +264,6 @@ class Proof:
                     'file_id': self.settings.FILE_ID or 0,
                     'job_id': self.settings.JOB_ID or '',
                     'owner_address': self.settings.OWNER_ADDRESS or '',
-                    'submission_type': 'coinbase_trading',
                     'file': {
                         'id': self.settings.FILE_ID or 0,
                         'source': 'TEE',
@@ -336,26 +291,120 @@ class Proof:
             return proof_response
 
         except Exception as e:
-            logger.error(f"Error processing Coinbase data: {e}")
+            logger.error(f"Error generating coinbase proof: {e}")
             raise
 
-    def generate(self) -> ProofResponse:
-        """Generate proof by verifying user ID and fetching fresh data"""
+    def _generate_binance_proof(self) -> ProofResponse:
+        """Generate proof for Binance contribution"""
         try:
-            # Load decrypted data
+            # Find zip file
+            zip_file_path = None
             for filename in os.listdir(self.settings.INPUT_DIR):
-                if os.path.splitext(filename)[1].lower() == '.json':
-                    file_path = os.path.join(self.settings.INPUT_DIR, filename)
-                    with open(file_path, 'r') as f:
-                        data = json.load(f)
+                if filename.endswith('.zip'):
+                    zip_file_path = os.path.join(self.settings.INPUT_DIR, filename)
+                    break
 
-            # Detect submission type and process accordingly
-            submission_type = self._detect_submission_type(data)
-            if submission_type == 'insights':
-                return self._process_market_insights(data, self.settings.FILE_URL)
-            else:
-                return self._process_coinbase_data(data, self.settings.FILE_URL)
+            if not zip_file_path:
+                raise FileNotFoundError("No zip file found in input directory")
+
+            transactions = self.binance_validator.process_zip_file(zip_file_path)
+            is_valid, message = self.binance_validator.validate_transactions(transactions)
+
+            if not is_valid:
+                raise ValueError(message)
+
+            validation_data = self.binance_validator.calculate_rewards(transactions)
+
+            # Convert validation data to contribution data format
+            contribution_data = self._convert_binance_to_contribution_data(validation_data)
+
+            has_existing, existing_data = self.storage.check_existing_contribution(
+                validation_data.account_id_hash
+            )
+
+            if has_existing:
+                logger.warning(f"Duplicate contribution detected for account {validation_data.account_id_hash}")
+                return ProofResponse(
+                    dlp_id=self.settings.DLP_ID,
+                    valid=False,
+                    score=0,
+                    authenticity=1.0,
+                    ownership=1.0,
+                    quality=0.0,
+                    uniqueness=0.0,
+                    attributes={
+                        'account_id_hash': validation_data.account_id_hash,
+                        'transaction_count': len(transactions),
+                        'previously_contributed': True,
+                        'times_rewarded': existing_data.times_rewarded if existing_data else 0,
+                    }
+                )
+
+            points_breakdown = self.scorer.calculate_score(contribution_data.stats)
+            points = points_breakdown.total_points
+            score = self.scorer.normalize_score(points, self.settings.MAX_POINTS)
+
+            raw_data = contribution_data.raw_data
+
+            encrypted_checksum, decrypted_checksum = self._encrypt_and_upload(
+                raw_data,
+                self.settings.FILE_URL
+            )
+
+            proof_response = ProofResponse(
+                dlp_id=self.settings.DLP_ID,
+                valid=True,
+                score=score,
+                authenticity=1.0,
+                ownership=1.0,
+                quality=1.0 if len(transactions) > 0 else 0.0,
+                uniqueness=1.0,
+                attributes={
+                    'account_id_hash': validation_data.account_id_hash,
+                    'transaction_count': len(transactions),
+                    'total_volume': float(validation_data.total_volume),
+                    'data_validated': True,
+                    'activity_period_days': (validation_data.end_time - validation_data.start_time).days,
+                    'unique_assets': len(contribution_data.stats.unique_assets),
+                    'previously_contributed': False,
+                    'points': points,
+                    'points_breakdown': points_breakdown,
+                    'checksums': {
+                        'encrypted': encrypted_checksum,
+                        'decrypted': decrypted_checksum
+                    }
+                },
+                metadata={
+                    'dlp_id': self.settings.DLP_ID or 0,
+                    'version': '1.0.0',
+                    'file_id': self.settings.FILE_ID or 0,
+                    'job_id': self.settings.JOB_ID or '',
+                    'owner_address': self.settings.OWNER_ADDRESS or '',
+                    'file': {
+                        'id': self.settings.FILE_ID or 0,
+                        'source': 'TEE',
+                        'url': self.settings.FILE_URL,
+                        'checksums': {
+                            'encrypted': encrypted_checksum,
+                            'decrypted': decrypted_checksum
+                        }
+                    }
+                }
+            )
+
+            if score > 0:
+                self.storage.store_contribution(
+                    contribution_data,
+                    proof_response,
+                    self.settings.FILE_ID or 0,
+                    self.settings.FILE_URL or '',
+                    self.settings.JOB_ID or '',
+                    self.settings.OWNER_ADDRESS or '',
+                    ''  # No refresh
+                )
+
+            return proof_response
 
         except Exception as e:
-            logger.error(f"Error generating proof: {e}")
+            logger.error(f"Error generating Binance proof: {e}")
             raise
