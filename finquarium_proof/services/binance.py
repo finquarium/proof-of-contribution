@@ -9,8 +9,10 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Dict, Tuple
 import requests
-
+import logging
 from ..models.binance import BinanceTransaction, BinanceValidationData
+
+logger = logging.getLogger(__name__)
 
 class BinanceAPI:
     def __init__(self, api_key: str, api_secret: str):
@@ -76,7 +78,7 @@ class BinanceAPI:
                     response.raise_for_status()
 
                     # Log response for debugging
-                    print(f"Response for {symbol}: {response.text}")
+                    logger.info(f"Response for {symbol}: {response.text}")
 
                     current_trades = response.json()
                     trades.extend(current_trades)
@@ -93,7 +95,7 @@ class BinanceAPI:
 
                 except requests.exceptions.RequestException as e:
                     if attempt == 2:  # Last attempt
-                        print(f"Failed to get trades for {symbol} after 3 attempts: {str(e)}")
+                        logger.info(f"Failed to get trades for {symbol} after 3 attempts: {str(e)}")
                         raise
                     wait_time = (2 ** attempt) * 0.1  # 0.1s, 0.2s, 0.4s
                     time.sleep(wait_time)
@@ -101,9 +103,9 @@ class BinanceAPI:
             return trades
 
         except Exception as e:
-            print(f"Error getting trades for {symbol}: {str(e)}")
+            logger.info(f"Error getting trades for {symbol}: {str(e)}")
             if hasattr(e, 'response'):
-                print(f"Response: {e.response.text}")
+                logger.info(f"Response: {e.response.text}")
             raise
 
 class BinanceValidator:
@@ -185,9 +187,9 @@ class BinanceValidator:
 
     def validate_transactions(self, transactions: List[BinanceTransaction]) -> Tuple[bool, str]:
         """
-        Validate transactions with improved error handling and time range handling.
+        Validate transactions with timezone-aware comparison.
         """
-        # Group transactions by symbol and time range
+        # Group transactions by symbol
         symbol_groups = {}
         for tx in transactions:
             symbol = tx.symbol
@@ -196,46 +198,100 @@ class BinanceValidator:
             symbol_groups[symbol].append(tx)
 
         for symbol, txs in symbol_groups.items():
-            # Get time range for these transactions with some buffer
-            start_time = int(min(tx.timestamp for tx in txs).timestamp() * 1000) - (24 * 60 * 60 * 1000)  # 1 day before
-            end_time = int(max(tx.timestamp for tx in txs).timestamp() * 1000) + (24 * 60 * 60 * 1000)  # 1 day after
-
             try:
-                # Get trades from API
-                # api_trades = self.api.get_my_trades(symbol, start_time, end_time)
+                # Get trades from API without time range filtering
                 api_trades = self.api.get_my_trades(symbol)
 
                 if not api_trades:
-                    print(f"No trades found for {symbol} between {start_time} and {end_time}")
+                    logger.info(f"No trades found for {symbol}")
                     continue
 
-                # Create lookup of API trades with rounding to handle floating point differences
+                # Create lookup of API trades with normalized values
                 api_trades_lookup = {}
                 for trade in api_trades:
-                    key = (
-                        datetime.fromtimestamp(trade['time'] / 1000),
-                        round(float(trade['price']), 8),
-                        round(float(trade['qty']), 8),
-                        round(float(trade['commission']), 8)
+                    # Convert API trade timestamp to UTC datetime for comparison
+                    trade_time = datetime.utcfromtimestamp(trade['time'] / 1000)
+
+                    # Round values to 8 decimal places for consistent comparison
+                    trade_tuple = (
+                        trade_time,
+                        float(trade['price']),
+                        float(trade['qty']),
+                        float(trade['commission']),
+                        trade['commissionAsset'],
+                        trade['isBuyer']
                     )
-                    api_trades_lookup[key] = trade
+                    api_trades_lookup[trade_tuple] = trade
+
+                logger.info(f"\nValidating trades for {symbol}:")
+                logger.info(f"Found {len(api_trades)} trades in API response")
+                logger.info(f"Found {len(txs)} trades in CSV export")
 
                 # Verify each transaction exists in API response
                 for tx in txs:
-                    key = (
+                    # Convert transaction data to match API format
+                    is_buyer = tx.side.upper() == 'BUY'
+                    # Assume tx.timestamp is already in UTC since it came from CSV with UTC marker
+                    tx_tuple = (
                         tx.timestamp,
-                        round(float(tx.price), 8),
-                        round(float(tx.quantity), 8),
-                        round(float(tx.fee), 8)
+                        float(tx.price),
+                        float(tx.quantity),
+                        float(tx.fee),
+                        tx.fee_asset,
+                        is_buyer
                     )
-                    if key not in api_trades_lookup:
+
+                    # Debug print transaction details with timezone info
+                    logger.info(f"\nLooking for transaction (UTC):")
+                    logger.info(f"Time: {tx.timestamp} UTC")
+                    logger.info(f"Price: {tx.price}")
+                    logger.info(f"Quantity: {tx.quantity}")
+                    logger.info(f"Fee: {tx.fee} {tx.fee_asset}")
+                    logger.info(f"Side: {tx.side}")
+
+                    # Try to find matching trade with some tolerance for timestamp
+                    found_match = False
+                    for api_tuple in api_trades_lookup.keys():
+                        # Debug print API trade details for comparison
+                        logger.info(f"\nComparing with API trade (UTC):")
+                        logger.info(f"Time: {api_tuple[0]} UTC")
+                        logger.info(f"Price: {api_tuple[1]}")
+                        logger.info(f"Quantity: {api_tuple[2]}")
+                        logger.info(f"Fee: {api_tuple[3]} {api_tuple[4]}")
+                        logger.info(f"Side: {'BUY' if api_tuple[5] else 'SELL'}")
+
+                        # Check if values match within tolerance
+                        time_diff = abs((tx_tuple[0] - api_tuple[0]).total_seconds())
+                        price_matches = abs(tx_tuple[1] - api_tuple[1]) < 0.00000001
+                        qty_matches = abs(tx_tuple[2] - api_tuple[2]) < 0.00000001
+                        fee_matches = abs(tx_tuple[3] - api_tuple[3]) < 0.00000001
+                        asset_matches = tx_tuple[4] == api_tuple[4]
+                        side_matches = tx_tuple[5] == api_tuple[5]
+
+                        logger.info(f"Time difference: {time_diff} seconds")
+                        logger.info(f"Price matches: {price_matches}")
+                        logger.info(f"Quantity matches: {qty_matches}")
+                        logger.info(f"Fee matches: {fee_matches}")
+                        logger.info(f"Asset matches: {asset_matches}")
+                        logger.info(f"Side matches: {side_matches}")
+
+                        if (time_diff < 5 and price_matches and qty_matches and
+                                fee_matches and asset_matches and side_matches):
+                            found_match = True
+                            logger.info("FOUND MATCH!")
+                            break
+
+                    if not found_match:
+                        logger.info("\nNo matching trade found!")
                         return False, f"Transaction validation failed for {symbol} at {tx.timestamp}"
+                    else:
+                        logger.info("Trade validated successfully!")
+
+                return True, "All transactions validated successfully"
 
             except Exception as e:
-                print(f"Error validating {symbol}: {str(e)}")
+                logger.info(f"Error validating {symbol}: {str(e)}")
                 return False, f"Validation failed for {symbol}: {str(e)}"
-
-        return True, "All transactions validated successfully"
 
     def calculate_rewards(self, transactions: List[BinanceTransaction]) -> BinanceValidationData:
         # Calculate metrics
