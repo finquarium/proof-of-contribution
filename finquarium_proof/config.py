@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     BINANCE_API_KEY: Optional[str] = Field(None, description="Binance API key")
     BINANCE_API_SECRET: Optional[str] = Field(None, description="Binance API secret")
 
+    # Proxy settings
+    PROXY_URL: Optional[str] = Field(None, description="Proxy URL")
+    PROXY_API_KEY: Optional[str] = Field(None, description="Proxy API key")
+
     ENCRYPTION_KEY: Optional[str] = Field(..., description="Encryption key for the file")
 
     # S3 credentials
