@@ -59,11 +59,22 @@ class ContributionScorer:
             diversity_reason=diversity_reason,
             history_points=history_points,
             history_reason=history_reason,
-            total_points=max(volume_points + diversity_points + history_points, 1)  # Ensure minimum of 1 point
+            total_points=volume_points + diversity_points + history_points
         )
 
-    def normalize_score(self, points: int, max_points: int) -> float:
-        """Convert points to 0-1 score range with minimum score for 0.01 FIN"""
+    def normalize_score(self, points: int, max_points: int, is_first_contribution: bool) -> float:
+        """
+        Convert points to 0-1 score range.
+        Only apply minimum score for first-time contributions.
+        """
+        if points == 0 and not is_first_contribution:
+            return 0.0
+
         min_score = 0.0000158730158730159  # This gives 0.01 FIN when multiplied by REWARD_FACTOR (630)
         raw_score = points / max_points
-        return max(raw_score, min_score)  # Ensure minimum score is achieved
+
+        # Only apply minimum score for first contributions
+        if is_first_contribution:
+            return max(raw_score, min_score)
+
+        return raw_score

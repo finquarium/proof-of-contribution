@@ -202,7 +202,7 @@ class Proof:
             raise ValueError(f"Unsupported contribution type: {contribution_type}")
 
     def _generate_coinbase_proof(self) -> ProofResponse:
-        """Original Coinbase proof generation logic"""
+        """Coinbase proof generation logic"""
         try:
             # Validate user ID ownership
             user_id, file_url = self._load_and_validate_user_id_hash()
@@ -215,23 +215,24 @@ class Proof:
                 fresh_data.account_id_hash
             )
 
-            # Calculate validity:
-            # Has not participated before
-            is_valid = not has_existing
+            # Calculate fresh scores
+            points_breakdown = self.scorer.calculate_score(fresh_data.stats)
+            fresh_points = points_breakdown.total_points
+            fresh_score = self.scorer.normalize_score(fresh_points, self.settings.MAX_POINTS, not has_existing)
 
-            # Calculate scores
-            if not is_valid:
-                score = 0
-                points = 0
-                points_breakdown = {
-                    'volume': '0 (invalid contribution)',
-                    'diversity': '0 (invalid contribution)',
-                    'history': '0 (invalid contribution)'
-                }
-            else:
-                points_breakdown = self.scorer.calculate_score(fresh_data.stats)
-                points = points_breakdown.total_points
-                score = self.scorer.normalize_score(points_breakdown.total_points, self.settings.MAX_POINTS)
+            # Initialize variables for differential scoring
+            differential_points = fresh_points
+            final_score = fresh_score
+            previously_rewarded = False
+
+            if has_existing:
+                # Calculate points from previous contribution
+                previous_points = int(existing_data.latest_score * self.settings.MAX_POINTS)
+
+                # Only count the additional points above previous contribution
+                differential_points = max(0, fresh_points - previous_points)
+                final_score = self.scorer.normalize_score(differential_points, self.settings.MAX_POINTS, False)
+                previously_rewarded = existing_data.times_rewarded > 0
 
             # Encrypt and update file in S3
             encrypted_checksum, decrypted_checksum = self._encrypt_and_upload(
@@ -239,15 +240,15 @@ class Proof:
                 file_url
             )
 
-            # Create proof response
+            # Create proof response with differential scoring
             proof_response = ProofResponse(
                 dlp_id=self.settings.DLP_ID,
-                valid=is_valid,
-                score=score,
+                valid=True,        # Always valid now, we just adjust the score
+                score=final_score,
                 authenticity=1.0,  # Data is fresh from Coinbase
-                ownership=1.0,  # Verified through user ID
+                ownership=1.0,     # Verified through user ID
                 quality=1.0 if fresh_data.stats.transaction_count > 0 else 0.0,
-                uniqueness=0.0 if has_existing else 1.0,
+                uniqueness=1.0 if not has_existing else 0.99,
                 attributes={
                     'account_id_hash': fresh_data.account_id_hash,
                     'transaction_count': fresh_data.stats.transaction_count,
@@ -256,8 +257,10 @@ class Proof:
                     'activity_period_days': fresh_data.stats.activity_period_days,
                     'unique_assets': len(fresh_data.stats.unique_assets),
                     'previously_contributed': has_existing,
+                    'previously_rewarded': previously_rewarded,
                     'times_rewarded': existing_data.times_rewarded if existing_data else 0,
-                    'points': points,
+                    'total_points': fresh_points,
+                    'differential_points': differential_points,
                     'points_breakdown': points_breakdown,
                 },
                 metadata={
@@ -278,8 +281,8 @@ class Proof:
                 }
             )
 
-            # Store contribution if score > 0
-            if score > 0:
+            # Store contribution if there are new points to award
+            if differential_points > 0:
                 self.storage.store_contribution(
                     fresh_data,
                     proof_response,
@@ -320,47 +323,44 @@ class Proof:
             # Convert validation data to contribution data format
             contribution_data = self._convert_binance_to_contribution_data(validation_data)
 
+            # Check for existing contribution
             has_existing, existing_data = self.storage.check_existing_contribution(
                 validation_data.account_id_hash
             )
 
-            if has_existing:
-                logger.warning(f"Duplicate contribution detected for account {validation_data.account_id_hash}")
-                return ProofResponse(
-                    dlp_id=self.settings.DLP_ID,
-                    valid=False,
-                    score=0,
-                    authenticity=1.0,
-                    ownership=1.0,
-                    quality=0.0,
-                    uniqueness=0.0,
-                    attributes={
-                        'account_id_hash': validation_data.account_id_hash,
-                        'transaction_count': len(transactions),
-                        'previously_contributed': True,
-                        'times_rewarded': existing_data.times_rewarded if existing_data else 0,
-                    }
-                )
-
+            # Calculate fresh scores
             points_breakdown = self.scorer.calculate_score(contribution_data.stats)
-            points = points_breakdown.total_points
-            score = self.scorer.normalize_score(points, self.settings.MAX_POINTS)
+            fresh_points = points_breakdown.total_points
+            fresh_score = self.scorer.normalize_score(fresh_points, self.settings.MAX_POINTS, not has_existing)
 
-            raw_data = contribution_data.raw_data
+            # Initialize variables for differential scoring
+            differential_points = fresh_points
+            final_score = fresh_score
+            previously_rewarded = False
 
+            if has_existing:
+                # Calculate points from previous contribution
+                previous_points = int(existing_data.latest_score * self.settings.MAX_POINTS)
+
+                # Only count the additional points above previous contribution
+                differential_points = max(0, fresh_points - previous_points)
+                final_score = self.scorer.normalize_score(differential_points, self.settings.MAX_POINTS, False)
+                previously_rewarded = existing_data.times_rewarded > 0
+
+            # Encrypt and upload data
             encrypted_checksum, decrypted_checksum = self._encrypt_and_upload(
-                raw_data,
+                contribution_data.raw_data,
                 self.settings.FILE_URL
             )
 
             proof_response = ProofResponse(
                 dlp_id=self.settings.DLP_ID,
-                valid=True,
-                score=score,
+                valid=True,  # Always valid now, we just adjust the score
+                score=final_score,
                 authenticity=1.0,
                 ownership=1.0,
                 quality=1.0 if len(transactions) > 0 else 0.0,
-                uniqueness=1.0,
+                uniqueness=1.0 if not has_existing else 0.99,
                 attributes={
                     'account_id_hash': validation_data.account_id_hash,
                     'transaction_count': len(transactions),
@@ -368,8 +368,11 @@ class Proof:
                     'data_validated': True,
                     'activity_period_days': (validation_data.end_time - validation_data.start_time).days,
                     'unique_assets': len(contribution_data.stats.unique_assets),
-                    'previously_contributed': False,
-                    'points': points,
+                    'previously_contributed': has_existing,
+                    'previously_rewarded': previously_rewarded,
+                    'times_rewarded': existing_data.times_rewarded if existing_data else 0,
+                    'total_points': fresh_points,
+                    'differential_points': differential_points,
                     'points_breakdown': points_breakdown,
                     'checksums': {
                         'encrypted': encrypted_checksum,
@@ -394,7 +397,8 @@ class Proof:
                 }
             )
 
-            if score > 0:
+            # Store contribution if there are new points to award
+            if differential_points > 0:
                 self.storage.store_contribution(
                     contribution_data,
                     proof_response,
@@ -402,7 +406,7 @@ class Proof:
                     self.settings.FILE_URL or '',
                     self.settings.JOB_ID or '',
                     self.settings.OWNER_ADDRESS or '',
-                    ''  # No refresh
+                    ''  # No refresh token for Binance
                 )
 
             return proof_response
