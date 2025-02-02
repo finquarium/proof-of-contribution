@@ -1,21 +1,43 @@
 # finquarium_proof/db_config.py
 """Database configuration and credentials management for TEE"""
 from dataclasses import dataclass
-from typing import Optional
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from urllib.parse import urlparse
 
 from finquarium_proof.config import settings
 
-# Production database configuration
-DB_CONFIG = {
+# Network-specific database configurations
+MAINNET_CONFIG = {
     'HOST': 'ep-old-dew-a5puhh9f.us-east-2.aws.neon.tech',
     'PORT': '5432',
     'NAME': 'finquarium',
     'USER': 'finqaurium-admin',
     'SSL_MODE': 'require'
 }
+
+TESTNET_CONFIG = {
+    'HOST': 'ep-old-dew-a5puhh9f.us-east-2.aws.neon.tech',
+    'PORT': '5432',
+    'NAME': 'finquarium-dev',
+    'USER': 'finquarium-dev_owner',
+    'SSL_MODE': 'require'
+}
+
+def determine_network_config() -> dict:
+    """Determine database configuration based on DLP_ID."""
+    if not settings.DLP_ID:
+        raise ValueError("DLP_ID setting is required")
+
+    if settings.DLP_ID == 13:
+        return MAINNET_CONFIG
+    elif settings.DLP_ID == 25:
+        return TESTNET_CONFIG
+    else:
+        raise ValueError(f"Invalid DLP_ID {settings.DLP_ID}. Must be 13 (mainnet) or 25 (testnet)")
+
+# Select configuration based on DLP_ID
+DB_CONFIG = determine_network_config()
 
 @dataclass
 class DatabaseCredentials:
