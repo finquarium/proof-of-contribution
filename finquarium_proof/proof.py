@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 from finquarium_proof.config import Settings
 from finquarium_proof.models.proof import ProofResponse
 from finquarium_proof.models.contribution import ContributionType, TradingStats, ContributionData, Transaction
-from finquarium_proof.models.binance import BinanceValidationData, BinanceTransaction
+from finquarium_proof.models.binance import BinanceValidationData
 from .services.coinbase import CoinbaseAPI
 from finquarium_proof.services.binance import BinanceValidator
 from finquarium_proof.services.storage import StorageService

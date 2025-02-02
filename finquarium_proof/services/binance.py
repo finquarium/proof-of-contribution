@@ -371,7 +371,7 @@ class BinanceValidator:
 
         # Get account info for ID hash
         account_info = self.api.get_account_info()
-        account_id_hash = hashlib.sha256(str(account_info['accountType']).encode()).hexdigest()
+        account_id_hash = hashlib.sha256(str(account_info['uid']).encode()).hexdigest()
 
         return BinanceValidationData(
             account_id_hash=account_id_hash,
