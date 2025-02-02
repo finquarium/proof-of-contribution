@@ -12,7 +12,7 @@ class S3Settings(BaseModel):
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
     # Required settings
-    POSTGRES_URL: str = Field(..., description="PostgreSQL connection URL")
+    DB_PASSWORD: str = Field(..., description="Database password")
 
     # Coinbase settings
     COINBASE_TOKEN: Optional[str] = Field(None, description="Coinbase API access token")
