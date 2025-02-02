@@ -18,20 +18,32 @@ class StorageService:
         self.session = session
 
     def check_existing_contribution(self, account_id_hash: str) -> Tuple[bool, Optional[ExistingContribution]]:
-        """Check if user has already contributed and get their contribution record"""
+        """Check if user has already contributed and get their cumulative contribution record"""
         try:
-            contribution = self.session.query(UserContribution).filter_by(
+            # Query ContributionProof table instead of UserContribution
+            previous_proofs = self.session.query(ContributionProof).filter_by(
                 account_id_hash=account_id_hash
-            ).first()
+            ).all()
 
-            if contribution:
+            if previous_proofs:
+                # Calculate cumulative score from all previous proofs
+                total_score = sum(float(getattr(p, 'score', 0.0)) for p in previous_proofs)
+
+                # Count how many times rewards were given (proofs with score > 0)
+                times_rewarded = sum(1 for p in previous_proofs if float(getattr(p, 'score', 0.0)) > 0)
+
+                # Get the most recent contribution for other stats
+                latest_contribution = self.session.query(UserContribution).filter_by(
+                    account_id_hash=account_id_hash
+                ).order_by(UserContribution.latest_contribution_at.desc()).first()
+
                 return True, ExistingContribution(
-                    times_rewarded=contribution.times_rewarded,
-                    transaction_count=contribution.transaction_count,
-                    total_volume=contribution.total_volume,
-                    activity_period_days=contribution.activity_period_days,
-                    unique_assets=contribution.unique_assets,
-                    latest_score=contribution.latest_score
+                    times_rewarded=times_rewarded,
+                    transaction_count=getattr(latest_contribution, 'transaction_count', 0),
+                    total_volume=float(getattr(latest_contribution, 'total_volume', 0.0)),
+                    activity_period_days=getattr(latest_contribution, 'activity_period_days', 0),
+                    unique_assets=getattr(latest_contribution, 'unique_assets', 0),
+                    latest_score=total_score
                 )
             return False, None
         except SQLAlchemyError as e:
