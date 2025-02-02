@@ -218,7 +218,7 @@ class Proof:
             # Calculate fresh scores
             points_breakdown = self.scorer.calculate_score(fresh_data.stats)
             fresh_points = points_breakdown.total_points
-            fresh_score = self.scorer.normalize_score(fresh_points, self.MAX_POINTS, not has_existing)
+            fresh_score = self.scorer.normalize_score(fresh_points, MAX_POINTS, not has_existing)
 
             # Initialize variables for differential scoring
             differential_points = fresh_points
