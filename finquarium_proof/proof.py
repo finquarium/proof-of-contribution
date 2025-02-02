@@ -10,7 +10,7 @@ import boto3
 from urllib.parse import urlparse
 
 
-from finquarium_proof.config import Settings
+from finquarium_proof.config import Settings, MAX_POINTS
 from finquarium_proof.models.proof import ProofResponse
 from finquarium_proof.models.contribution import ContributionType, TradingStats, ContributionData, Transaction
 from finquarium_proof.models.binance import BinanceValidationData
@@ -218,7 +218,7 @@ class Proof:
             # Calculate fresh scores
             points_breakdown = self.scorer.calculate_score(fresh_data.stats)
             fresh_points = points_breakdown.total_points
-            fresh_score = self.scorer.normalize_score(fresh_points, self.settings.MAX_POINTS, not has_existing)
+            fresh_score = self.scorer.normalize_score(fresh_points, self.MAX_POINTS, not has_existing)
 
             # Initialize variables for differential scoring
             differential_points = fresh_points
@@ -227,11 +227,11 @@ class Proof:
 
             if has_existing:
                 # Calculate points from previous contribution
-                previous_points = int(existing_data.latest_score * self.settings.MAX_POINTS)
+                previous_points = int(existing_data.latest_score * MAX_POINTS)
 
                 # Only count the additional points above previous contribution
                 differential_points = max(0, fresh_points - previous_points)
-                final_score = self.scorer.normalize_score(differential_points, self.settings.MAX_POINTS, False)
+                final_score = self.scorer.normalize_score(differential_points, MAX_POINTS, False)
                 previously_rewarded = existing_data.times_rewarded > 0
 
             # Encrypt and update file in S3
@@ -331,7 +331,7 @@ class Proof:
             # Calculate fresh scores
             points_breakdown = self.scorer.calculate_score(contribution_data.stats)
             fresh_points = points_breakdown.total_points
-            fresh_score = self.scorer.normalize_score(fresh_points, self.settings.MAX_POINTS, not has_existing)
+            fresh_score = self.scorer.normalize_score(fresh_points, MAX_POINTS, not has_existing)
 
             # Initialize variables for differential scoring
             differential_points = fresh_points
@@ -340,11 +340,11 @@ class Proof:
 
             if has_existing:
                 # Calculate points from previous contribution
-                previous_points = int(existing_data.latest_score * self.settings.MAX_POINTS)
+                previous_points = int(existing_data.latest_score * MAX_POINTS)
 
                 # Only count the additional points above previous contribution
                 differential_points = max(0, fresh_points - previous_points)
-                final_score = self.scorer.normalize_score(differential_points, self.settings.MAX_POINTS, False)
+                final_score = self.scorer.normalize_score(differential_points, MAX_POINTS, False)
                 previously_rewarded = existing_data.times_rewarded > 0
 
             # Encrypt and upload data

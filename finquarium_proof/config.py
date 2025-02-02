@@ -33,9 +33,6 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: str = Field(..., description="AWS secret access key")
     AWS_REGION: str = Field(default="us-east-1", description="AWS region")
 
-    # Proof settings
-    MAX_POINTS: int = 630
-
     # Optional context settings - can be None if not provided
     DLP_ID: Optional[int] = Field(25, description="Data Liquidity Pool ID")
     FILE_ID: Optional[int] = Field(0, description="File ID being processed")
@@ -63,3 +60,6 @@ class Settings(BaseSettings):
     )
 
 settings = Settings()
+
+# Constants
+MAX_POINTS = 630
