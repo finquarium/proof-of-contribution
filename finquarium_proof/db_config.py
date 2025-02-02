@@ -12,7 +12,7 @@ MAINNET_CONFIG = {
     'HOST': 'ep-old-dew-a5puhh9f.us-east-2.aws.neon.tech',
     'PORT': '5432',
     'NAME': 'finquarium',
-    'USER': 'finqaurium-admin',
+    'USER': 'finquarium-admin',
     'SSL_MODE': 'require'
 }
 
@@ -24,6 +24,14 @@ TESTNET_CONFIG = {
     'SSL_MODE': 'require'
 }
 
+LOCAL_CONFIG = {
+    'HOST': 'localhost',
+    'PORT': '5432',
+    'NAME': 'finquarium',
+    'USER': 'finquarium',
+    'SSL_MODE': 'disable'
+}
+
 def determine_network_config() -> dict:
     """Determine database configuration based on DLP_ID."""
     if not settings.DLP_ID:
@@ -33,8 +41,10 @@ def determine_network_config() -> dict:
         return MAINNET_CONFIG
     elif settings.DLP_ID == 25:
         return TESTNET_CONFIG
+    elif settings.DLP_ID == 0:
+        return LOCAL_CONFIG
     else:
-        raise ValueError(f"Invalid DLP_ID {settings.DLP_ID}. Must be 13 (mainnet) or 25 (testnet)")
+        raise ValueError(f"Invalid DLP_ID {settings.DLP_ID}. Must be 13 (mainnet) or 25 (testnet) or 0 (local)")
 
 # Select configuration based on DLP_ID
 DB_CONFIG = determine_network_config()

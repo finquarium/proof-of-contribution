@@ -67,7 +67,11 @@ def run() -> None:
     except Exception as e:
         logger.error(f"Error during proof generation: {e}")
         traceback.print_exc()
+        db.dispose()  # Clean up database resources on error
         sys.exit(1)
+    finally:
+        # Always clean up database resources
+        db.dispose()
 
 if __name__ == "__main__":
     run()
