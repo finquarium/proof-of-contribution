@@ -33,9 +33,8 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: str = Field(..., description="AWS secret access key")
     AWS_REGION: str = Field(default="us-east-1", description="AWS region")
 
-    # Optional settings with defaults
-    REWARD_FACTOR: int = Field(630, description="Token reward multiplier (x10^18)")
-    MAX_POINTS: int = Field(630, description="Maximum possible points for scoring")
+    # Proof settings
+    MAX_POINTS: int = 630
 
     # Optional context settings - can be None if not provided
     DLP_ID: Optional[int] = Field(25, description="Data Liquidity Pool ID")

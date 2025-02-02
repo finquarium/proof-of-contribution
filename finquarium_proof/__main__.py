@@ -49,7 +49,7 @@ def run() -> None:
         logger.info(f"Processing {contribution_type.value} contribution")
 
         # Log config (excluding sensitive data)
-        safe_config = settings.model_dump(exclude={'COINBASE_TOKEN', 'POSTGRES_URL'})
+        safe_config = settings.model_dump(exclude={'COINBASE_TOKEN', 'POSTGRES_URL', 'DB_PASSWORD', 'PROXY_API_KEY', 'PROXY_URL'})
         logger.info("Using configuration:")
         logger.info(json.dumps(safe_config, indent=2))
 

@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple, Optional
 
 import requests
 
-from finquarium_proof.models.contribution import Transaction, TradingStats, ContributionData
+from finquarium_proof.models.contribution import Transaction, TradingStats, ContributionData, ContributionType
 
 logger = logging.getLogger(__name__)
 
@@ -152,5 +152,6 @@ class CoinbaseAPI:
             account_id_hash=account_id_hash,
             stats=stats,
             transactions=formatted_transactions,
-            raw_data=raw_data
+            raw_data=raw_data,
+            contribution_type=ContributionType.COINBASE,
         )

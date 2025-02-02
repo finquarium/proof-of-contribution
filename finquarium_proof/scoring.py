@@ -64,6 +64,6 @@ class ContributionScorer:
 
     def normalize_score(self, points: int, max_points: int) -> float:
         """Convert points to 0-1 score range with minimum score for 0.01 FIN"""
-        min_score = 0.00000158730158730159  # This gives 0.01 FIN when multiplied by REWARD_FACTOR (630)
+        min_score = 0.0000158730158730159  # This gives 0.01 FIN when multiplied by REWARD_FACTOR (630)
         raw_score = points / max_points
         return max(raw_score, min_score)  # Ensure minimum score is achieved
