@@ -3,11 +3,12 @@ import csv
 import hashlib
 import hmac
 import io
+import json
 import time
 import zipfile
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Any
 import requests
 import logging
 from ..models.binance import BinanceTransaction, BinanceValidationData
@@ -15,10 +16,12 @@ from ..models.binance import BinanceTransaction, BinanceValidationData
 logger = logging.getLogger(__name__)
 
 class BinanceAPI:
-    def __init__(self, api_key: str, api_secret: str):
+    def __init__(self, api_key: str, api_secret: str, proxy_url: str = None, proxy_api_key: str = None):
         self.API_URL = "https://api.binance.com"
         self.api_key = api_key
         self.api_secret = api_secret
+        self.proxy_url = proxy_url
+        self.proxy_api_key = proxy_api_key
 
     def _get_signature(self, query_string: str) -> str:
         return hmac.new(
@@ -27,23 +30,101 @@ class BinanceAPI:
             hashlib.sha256
         ).hexdigest()
 
+    def _make_request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict:
+        logger.info(f"Making request to endpoint: {endpoint}")
+        if not params:
+            params = {}
+
+        # Add timestamp if not present
+        if 'timestamp' not in params:
+            params['timestamp'] = int(time.time() * 1000)
+
+        # Add recvWindow if not present to prevent time sync issues
+        if 'recvWindow' not in params:
+            params['recvWindow'] = 60000
+
+        # Create signature
+        query_string = '&'.join([f"{k}={v}" for k, v in sorted(params.items())])
+        signature = self._get_signature(query_string)
+
+        # Prepare headers
+        headers = {'X-MBX-APIKEY': self.api_key}
+
+        # Add signature to params for URL construction
+        full_params = {**params, 'signature': signature}
+        full_query_string = '&'.join([f"{k}={v}" for k, v in sorted(full_params.items())])
+
+        # Construct full URL
+        url = f"{self.API_URL}{endpoint}?{full_query_string}"
+        logger.info(f"Full URL: {url}")
+
+        if self.proxy_url:
+            # Use proxy
+            proxy_payload = {
+                'url': url,
+                'headers': headers,
+                'method': 'GET'
+            }
+
+            # Add proxy authentication
+            proxy_headers = {
+                'Content-Type': 'application/json',
+                'x-api-key': self.proxy_api_key
+            }
+
+            response = requests.post(
+                self.proxy_url,
+                json=proxy_payload,
+                headers=proxy_headers
+            )
+
+            if response.status_code == 401:
+                raise Exception("Invalid proxy API key")
+
+            if response.status_code != 200:
+                raise Exception(f"Proxy request failed: {response.text}")
+
+            proxy_response = response.json()
+
+            # Check if proxy response contains error information
+            if isinstance(proxy_response, dict):
+                # Handle proxy error responses
+                if proxy_response.get('error'):
+                    raise Exception(f"Proxy error: {proxy_response.get('error')}")
+
+                # Handle wrapped Lambda responses
+                if 'statusCode' in proxy_response and proxy_response['statusCode'] != 200:
+                    raise Exception(f"Proxy request failed: {proxy_response.get('body')}")
+
+                # If we have a body field, try to parse it
+                if 'body' in proxy_response:
+                    try:
+                        parsed_body = json.loads(proxy_response['body'])
+                        # Check for Binance error response
+                        if isinstance(parsed_body, dict) and 'code' in parsed_body and parsed_body.get('code', 0) < 0:
+                            raise Exception(f"Binance API error: {parsed_body}")
+                        return parsed_body
+                    except json.JSONDecodeError:
+                        raise Exception(f"Invalid JSON in proxy response body: {proxy_response['body']}")
+
+            # If proxy_response doesn't match any error cases and is valid data, return it
+            return proxy_response
+
+        else:
+            # Direct request
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            return response.json()
+
     def get_account_info(self) -> Dict:
         endpoint = "/api/v3/account"
         timestamp = int(time.time() * 1000)
-        query_string = f"timestamp={timestamp}"
-        signature = self._get_signature(query_string)
+        params = {"timestamp": timestamp}
 
-        headers = {'X-MBX-APIKEY': self.api_key}
-        response = requests.get(
-            f"{self.API_URL}{endpoint}?{query_string}&signature={signature}",
-            headers=headers
-        )
-        return response.json()
+        return self._make_request(endpoint, params)
 
     def get_my_trades(self, symbol: str, start_time: int = None, end_time: int = None) -> List[Dict]:
-        """
-        Get trades for a specific symbol with proper error handling and pagination.
-        """
+        """Get trades for a specific symbol with proper error handling and pagination."""
         endpoint = "/api/v3/myTrades"
         limit = 1000  # Maximum allowed limit
         trades = []
@@ -53,9 +134,10 @@ class BinanceAPI:
             base_symbol = symbol.replace('USDT', '')
 
             params = {
-                "symbol": symbol,  # Keep original symbol for API call
+                "symbol": symbol,
                 "limit": limit,
-                "timestamp": int(time.time() * 1000)
+                "timestamp": int(time.time() * 1000),
+                "recvWindow": 60000
             }
 
             if start_time:
@@ -63,39 +145,30 @@ class BinanceAPI:
             if end_time:
                 params["endTime"] = end_time
 
-            query_string = "&".join(f"{k}={v}" for k, v in params.items())
-            signature = self._get_signature(query_string)
-
-            headers = {'X-MBX-APIKEY': self.api_key}
-
             # Add retries with exponential backoff
             for attempt in range(3):
                 try:
-                    response = requests.get(
-                        f"{self.API_URL}{endpoint}?{query_string}&signature={signature}",
-                        headers=headers
-                    )
-                    response.raise_for_status()
+                    response_data = self._make_request(endpoint, params)
+                    logger.info(f"Got response data type: {type(response_data)}")
 
-                    # Log response for debugging
-                    logger.info(f"Response for {symbol}: {response.text}")
+                    if not isinstance(response_data, list):
+                        raise Exception(f"Unexpected response format. Expected list, got: {type(response_data)}")
 
-                    current_trades = response.json()
-                    trades.extend(current_trades)
+                    trades.extend(response_data)
 
                     # If we got less than the limit, we've got all trades
-                    if len(current_trades) < limit:
+                    if len(response_data) < limit:
                         break
 
                     # Update params for next page using the last trade ID
-                    if current_trades:
-                        params["fromId"] = current_trades[-1]["id"]
+                    if response_data:
+                        params["fromId"] = response_data[-1]["id"]
 
                     break  # Success, exit retry loop
 
-                except requests.exceptions.RequestException as e:
+                except Exception as e:
                     if attempt == 2:  # Last attempt
-                        logger.info(f"Failed to get trades for {symbol} after 3 attempts: {str(e)}")
+                        logger.error(f"Failed to get trades for {symbol} after 3 attempts: {str(e)}")
                         raise
                     wait_time = (2 ** attempt) * 0.1  # 0.1s, 0.2s, 0.4s
                     time.sleep(wait_time)
@@ -103,14 +176,12 @@ class BinanceAPI:
             return trades
 
         except Exception as e:
-            logger.info(f"Error getting trades for {symbol}: {str(e)}")
-            if hasattr(e, 'response'):
-                logger.info(f"Response: {e.response.text}")
+            logger.error(f"Error getting trades for {symbol}: {str(e)}")
             raise
 
 class BinanceValidator:
-    def __init__(self, api_key: str, api_secret: str):
-        self.api = BinanceAPI(api_key, api_secret)
+    def __init__(self, api_key: str, api_secret: str, proxy_url: str = None, proxy_api_key: str = None):
+        self.api = BinanceAPI(api_key, api_secret, proxy_url, proxy_api_key)
 
     def parse_csv_file(self, csv_lines: List[str]) -> List[BinanceTransaction]:
         transactions = []
@@ -223,15 +294,13 @@ class BinanceValidator:
                     )
                     api_trades_lookup[trade_tuple] = trade
 
-                logger.info(f"\nValidating trades for {symbol}:")
-                logger.info(f"Found {len(api_trades)} trades in API response")
+                logger.info(f"Found {len(api_trades)} trades for {symbol}")
                 logger.info(f"Found {len(txs)} trades in CSV export")
 
                 # Verify each transaction exists in API response
                 for tx in txs:
                     # Convert transaction data to match API format
                     is_buyer = tx.side.upper() == 'BUY'
-                    # Assume tx.timestamp is already in UTC since it came from CSV with UTC marker
                     tx_tuple = (
                         tx.timestamp,
                         float(tx.price),
@@ -290,7 +359,7 @@ class BinanceValidator:
                 return True, "All transactions validated successfully"
 
             except Exception as e:
-                logger.info(f"Error validating {symbol}: {str(e)}")
+                logger.error(f"Error validating {symbol}: {str(e)}")
                 return False, f"Validation failed for {symbol}: {str(e)}"
 
     def calculate_rewards(self, transactions: List[BinanceTransaction]) -> BinanceValidationData:

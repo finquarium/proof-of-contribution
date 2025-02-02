@@ -43,7 +43,9 @@ class Proof:
         if self.settings.BINANCE_API_KEY and self.settings.BINANCE_API_SECRET:
             self.binance_validator = BinanceValidator(
                 self.settings.BINANCE_API_KEY,
-                self.settings.BINANCE_API_SECRET
+                self.settings.BINANCE_API_SECRET,
+                self.settings.PROXY_URL,
+                self.settings.PROXY_API_KEY,
             )
         else:
             self.binance_validator = None

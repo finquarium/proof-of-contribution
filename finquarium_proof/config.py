@@ -12,7 +12,7 @@ class S3Settings(BaseModel):
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
     # Required settings
-    POSTGRES_URL: str = Field(..., description="PostgreSQL connection URL")
+    DB_PASSWORD: str = Field(..., description="Database password")
 
     # Coinbase settings
     COINBASE_TOKEN: Optional[str] = Field(None, description="Coinbase API access token")
@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # Binance settings
     BINANCE_API_KEY: Optional[str] = Field(None, description="Binance API key")
     BINANCE_API_SECRET: Optional[str] = Field(None, description="Binance API secret")
+
+    # Proxy settings
+    PROXY_URL: Optional[str] = Field(None, description="Proxy URL")
+    PROXY_API_KEY: Optional[str] = Field(None, description="Proxy API key")
 
     ENCRYPTION_KEY: Optional[str] = Field(..., description="Encryption key for the file")
 

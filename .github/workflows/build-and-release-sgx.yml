@@ -62,16 +62,18 @@ jobs:
           ./gsc info-image gsc-finquarium-proof > ../sigstruct.txt
 
       - name: Upload image
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: gsc-finquarium-proof-image
           path: gsc-finquarium-proof.tar.gz
+          retention-days: 90
 
       - name: Upload verification data
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: gsc-finquarium-proof-sigstruct
           path: sigstruct.txt
+          retention-days: 90
 
       - name: Generate release body
         run: |
